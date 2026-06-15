@@ -1,0 +1,6 @@
+{
+  "name": "NDC Ghana Quiz",
+  "description": "Production-ready Quiz Competition App for the National Democratic Congress (NDC) Ghana, featuring secure authentication, live admin dashboard, analytics, and anti-cheat mechanism.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
