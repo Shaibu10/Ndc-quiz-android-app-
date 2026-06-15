@@ -2615,9 +2615,10 @@ fun AdminDashboardScreen(
     var auditLogSelectedAction by remember { mutableStateOf("All") }
     var auditLogDropdownExpanded by remember { mutableStateOf(false) }
 
-    var configProvider by remember { mutableStateOf("Supabase") }
-    var configDbUrl by remember { mutableStateOf("") }
-    var configProjectId by remember { mutableStateOf("") }
+    var configProvider by remember { mutableStateOf("Firebase") }
+    var configDbUrl by remember { mutableStateOf("https://firestore.googleapis.com/v1/projects/ndc-quiz-android-app/databases/(default)/documents") }
+    var configProjectId by remember { mutableStateOf("ndc-quiz-android-app") }
+    var isConnected by remember { mutableStateOf(true) }
     
     var addQuizTitle by remember { mutableStateOf("") }
     var addQuizDesc by remember { mutableStateOf("") }
@@ -5089,7 +5090,8 @@ fun AdminDashboardScreen(
                             DatabaseSettingsScreen(
                                 configProvider, { configProvider = it },
                                 configDbUrl, { configDbUrl = it },
-                                configProjectId, { configProjectId = it }
+                                configProjectId, { configProjectId = it },
+                                isConnected, { isConnected = !isConnected } // Simple toggle for demonstration
                             )
                         }
                     }
@@ -5106,59 +5108,96 @@ fun DatabaseSettingsScreen(
     dbUrl: String,
     onDbUrlChange: (String) -> Unit,
     projectId: String,
-    onProjectIdChange: (String) -> Unit
+    onProjectIdChange: (String) -> Unit,
+    isConnected: Boolean,
+    onTestConnection: () -> Unit
 ) {
     Column(modifier = Modifier.padding(16.dp)) {
         Text("Database Connection Management", style = MaterialTheme.typography.headlineMedium, color = Color.White)
         Spacer(modifier = Modifier.height(16.dp))
         
-        Text("IMPORTANT: To keep your app secure, please enter sensitive API keys in the Secrets panel in AI Studio.", color = NDCGold, fontSize = 12.sp)
+        // Status Indicator
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = if (isConnected) Icons.Default.CheckCircle else Icons.Default.Error,
+                contentDescription = null,
+                tint = if (isConnected) NDCGreen else NDCRed
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = if (isConnected) "Connected to $configProvider" else "Disconnected",
+                color = if (isConnected) NDCGreen else NDCRed,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        
         Spacer(modifier = Modifier.height(16.dp))
         
-        // Provider Selection
-        Text("Database Provider", color = Color.Gray, fontSize = 12.sp)
-        Row(modifier = Modifier.fillMaxWidth()) {
-            val providers = listOf("Supabase", "Firebase", "Other")
-            providers.forEach { p ->
-                RadioButton(
-                    selected = configProvider == p,
-                    onClick = { onProviderChange(p) },
-                    colors = RadioButtonDefaults.colors(selectedColor = NDCGreen, unselectedColor = Color.Gray)
-                )
-                Text(p, color = Color.White, modifier = Modifier.align(Alignment.CenterVertically))
-                Spacer(modifier = Modifier.width(8.dp))
+        if (isConnected) {
+            Text("Active Connection Details", style = MaterialTheme.typography.titleMedium, color = Color.White)
+            Text("Provider: $configProvider", color = Color.LightGray)
+            Text("URL: $dbUrl", color = Color.LightGray)
+            Text("Project ID: $projectId", color = Color.LightGray)
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = onTestConnection, colors = ButtonDefaults.buttonColors(containerColor = NDCRed)) {
+                Text("DISCONNECT")
             }
+        } else {
+            Text("IMPORTANT: To keep your app secure, please enter sensitive API keys in the Secrets panel in AI Studio.", color = NDCGold, fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Provider Selection
+            Text("Database Provider", color = Color.Gray, fontSize = 12.sp)
+            Row(modifier = Modifier.fillMaxWidth()) {
+                val providers = listOf("Supabase", "Firebase", "Other")
+                providers.forEach { p ->
+                    RadioButton(
+                        selected = configProvider == p,
+                        onClick = { onProviderChange(p) },
+                        colors = RadioButtonDefaults.colors(selectedColor = NDCGreen, unselectedColor = Color.Gray)
+                    )
+                    Text(p, color = Color.White, modifier = Modifier.align(Alignment.CenterVertically))
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            TextField(
+                value = dbUrl,
+                onValueChange = onDbUrlChange,
+                label = { Text("Database URL / Endpoint") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = TextFieldDefaults.colors(focusedContainerColor = NDCDarkBg, unfocusedContainerColor = NDCDarkBg, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            TextField(
+                value = projectId,
+                onValueChange = onProjectIdChange,
+                label = { Text("Project ID") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = TextFieldDefaults.colors(focusedContainerColor = NDCDarkBg, unfocusedContainerColor = NDCDarkBg, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
+            )
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Button(onClick = onTestConnection, colors = ButtonDefaults.buttonColors(containerColor = NDCGreen), modifier = Modifier.fillMaxWidth()) {
+                Text("TEST & CONNECT")
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text("Setup Guide", style = MaterialTheme.typography.titleMedium, color = Color.White)
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            val guide = when (configProvider) {
+                "Supabase" -> "1. Go to Supabase dashboard.\n2. Create a new project.\n3. Find your API URL and Project ID in Project Settings > API.\n4. Add API Key (ANON_KEY) to AI Studio Secrets panel."
+                "Firebase" -> "1. Go to Firebase Console.\n2. Create a new project.\n3. Create a Firestore database.\n4. Get your Project ID from General settings.\n5. Add Service Account JSON credentials to AI Studio Secrets panel."
+                else -> "Consult your database provider's documentation to find the required API URL/Endpoint and Project ID. Keep sensitive keys in the AI Studio Secrets panel."
+            }
+            Text(guide, color = Color.LightGray, fontSize = 14.sp)
         }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        TextField(
-            value = dbUrl,
-            onValueChange = onDbUrlChange,
-            label = { Text("Database URL / Endpoint") },
-            modifier = Modifier.fillMaxWidth(),
-            colors = TextFieldDefaults.colors(focusedContainerColor = NDCDarkBg, unfocusedContainerColor = NDCDarkBg, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
-        )
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        TextField(
-            value = projectId,
-            onValueChange = onProjectIdChange,
-            label = { Text("Project ID") },
-            modifier = Modifier.fillMaxWidth(),
-            colors = TextFieldDefaults.colors(focusedContainerColor = NDCDarkBg, unfocusedContainerColor = NDCDarkBg, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        Text("Setup Guide", style = MaterialTheme.typography.titleMedium, color = Color.White)
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        val guide = when (configProvider) {
-            "Supabase" -> "1. Go to Supabase dashboard.\n2. Create a new project.\n3. Find your API URL and Project ID in Project Settings > API.\n4. Add API Key (ANON_KEY) to AI Studio Secrets panel."
-            "Firebase" -> "1. Go to Firebase Console.\n2. Create a new project.\n3. Create a Firestore database.\n4. Get your Project ID from General settings.\n5. Add Service Account JSON credentials to AI Studio Secrets panel."
-            else -> "Consult your database provider's documentation to find the required API URL/Endpoint and Project ID. Keep sensitive keys in the AI Studio Secrets panel."
-        }
-        Text(guide, color = Color.LightGray, fontSize = 14.sp)
     }
 }

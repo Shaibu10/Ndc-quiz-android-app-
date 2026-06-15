@@ -1,6 +1,11 @@
 package com.example.data.repository
 
 import com.example.data.local.*
+import com.example.data.remote.FirebaseFirestoreSync
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -161,6 +166,15 @@ class SupabaseOfflineFirstQuizRepository(
         quizAppDao.insertUser(newUser)
         _currentUserState.value = newUser
         addAuditLog("USER_REGISTER", "Registered User: $fullName ($role)")
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushUser(newUser)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed syncing registration to Firebase: ${e.message}")
+            }
+        }
+        
         return Result.success(newUser)
     }
 
@@ -193,6 +207,15 @@ class SupabaseOfflineFirstQuizRepository(
         quizAppDao.insertUser(updatedUser)
         _currentUserState.value = updatedUser
         addAuditLog("PROFILE_UPDATE", "Updated details for ${fullName}")
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushUser(updatedUser)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed syncing profile update to Firebase: ${e.message}")
+            }
+        }
+        
         return Result.success(updatedUser)
     }
 
@@ -214,6 +237,13 @@ class SupabaseOfflineFirstQuizRepository(
     override suspend fun createCategory(category: CategoryEntity) {
         quizAppDao.insertCategory(category)
         addAuditLog("CATEGORY_CREATE", "Created: ${category.categoryName}")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushCategory(category)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed syncing Category to Firebase: ${e.message}")
+            }
+        }
     }
 
     override suspend fun deleteCategory(categoryId: String) {
@@ -235,6 +265,13 @@ class SupabaseOfflineFirstQuizRepository(
     override suspend fun createQuiz(quiz: QuizEntity) {
         quizAppDao.insertQuiz(quiz)
         addAuditLog("QUIZ_CREATE", "Created Quiz: ${quiz.title}")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushQuiz(quiz)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed syncing Quiz to Firebase: ${e.message}")
+            }
+        }
     }
 
     override suspend fun deleteQuiz(quizId: String) {
@@ -248,6 +285,11 @@ class SupabaseOfflineFirstQuizRepository(
         val updated = quiz.copy(active = !quiz.active)
         quizAppDao.insertQuiz(updated)
         addAuditLog("QUIZ_TOGGLE_ACTIVE", "Toggled active state of Quiz ID: $quizId to ${updated.active}")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushQuiz(updated)
+            } catch (e: Exception) {}
+        }
         return Result.success(Unit)
     }
 
@@ -262,10 +304,20 @@ class SupabaseOfflineFirstQuizRepository(
 
     override suspend fun insertQuestions(questions: List<QuestionEntity>) {
         quizAppDao.insertQuestions(questions)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                questions.forEach { FirebaseFirestoreSync.pushQuestion(it) }
+            } catch (e: Exception) {}
+        }
     }
 
     override suspend fun insertQuestion(question: QuestionEntity) {
         quizAppDao.insertQuestion(question)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushQuestion(question)
+            } catch (e: Exception) {}
+        }
     }
 
     override suspend fun deleteQuestion(id: String) {
@@ -324,6 +376,14 @@ class SupabaseOfflineFirstQuizRepository(
         )
         quizAppDao.insertLeaderboardEntry(leaderboardEntry)
 
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushLeaderboardEntry(leaderboardEntry)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed syncing leaderboard score to Firebase Firestore: ${e.message}")
+            }
+        }
+
         return Result.success(attempt)
     }
 
@@ -353,6 +413,11 @@ class SupabaseOfflineFirstQuizRepository(
     override suspend fun createSponsor(sponsor: SponsorEntity) {
         quizAppDao.insertSponsor(sponsor)
         addAuditLog("SPONSOR_CREATE", "Added Sponsor: ${sponsor.name}")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushSponsor(sponsor)
+            } catch (e: Exception) {}
+        }
     }
 
     override suspend fun deleteSponsor(id: String) {
@@ -380,6 +445,13 @@ class SupabaseOfflineFirstQuizRepository(
         )
         quizAppDao.insertAnnouncement(announcement)
         addAuditLog("ANNOUNCEMENT_CREATE", "Created Announcement: $title")
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushAnnouncement(announcement)
+            } catch (e: Exception) {}
+        }
+        
         return Result.success(announcement)
     }
 
@@ -393,6 +465,11 @@ class SupabaseOfflineFirstQuizRepository(
         val updated = announcement.copy(active = !announcement.active)
         quizAppDao.insertAnnouncement(updated)
         addAuditLog("ANNOUNCEMENT_TOGGLE_ACTIVE", "Toggled active state of Announcement ID: $id to ${updated.active}")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushAnnouncement(updated)
+            } catch (e: Exception) {}
+        }
         return Result.success(Unit)
     }
 
@@ -405,6 +482,11 @@ class SupabaseOfflineFirstQuizRepository(
         val updated = user.copy(status = status, updatedAt = System.currentTimeMillis())
         quizAppDao.insertUser(updated)
         addAuditLog("SUPER_ADMIN_ACTION", "Set status of ${user.fullName} to $status")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushUser(updated)
+            } catch (e: Exception) {}
+        }
         return Result.success(Unit)
     }
 
@@ -413,6 +495,11 @@ class SupabaseOfflineFirstQuizRepository(
         val updated = user.copy(role = role, updatedAt = System.currentTimeMillis())
         quizAppDao.insertUser(updated)
         addAuditLog("SUPER_ADMIN_ACTION", "Promoted/Changed ${user.fullName} to $role")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushUser(updated)
+            } catch (e: Exception) {}
+        }
         return Result.success(Unit)
     }
 
@@ -432,11 +519,28 @@ class SupabaseOfflineFirstQuizRepository(
             target = target
         )
         quizAppDao.insertAuditLog(log)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.pushAuditLog(log)
+            } catch (e: Exception) {}
+        }
     }
 
     override suspend fun checkAndSeedDatabase() {
+        // Try to sync with Firestore remote database first
+        try {
+            FirebaseFirestoreSync.performanceCompleteSync(quizAppDao)
+        } catch (e: Exception) {
+            Log.e("QuizRepository", "First-time remote database sync failed/offline: ${e.message}")
+        }
+
         val existingCats = quizAppDao.getAllCategoriesFlow().first()
-        if (existingCats.isNotEmpty()) return // Seeded already
+        if (existingCats.isNotEmpty()) {
+            Log.i("QuizRepository", "Database populated successfully (size: ${existingCats.size} categories)")
+            return // Seeded already (either via Firestore pull or local db cache)
+        }
+
+        Log.w("QuizRepository", "Empty database detected. Performing initial local high-fidelity seeding and Firestore uploads...")
 
         // 1. Categories
         val cats = listOf(
@@ -635,5 +739,25 @@ class SupabaseOfflineFirstQuizRepository(
             LeaderboardEntity(UUID.randomUUID().toString(), "dummy_3", "Aba Mensah", "quiz2", "cat2", 3, 90, 1, "Global", "Western", "Takoradi")
         )
         quizAppDao.insertLeaderboardEntries(testLeaders)
+
+        // Push all this newly created seed data up to Remote Firestore
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                cats.forEach { FirebaseFirestoreSync.pushCategory(it) }
+                FirebaseFirestoreSync.pushUser(adminUser)
+                FirebaseFirestoreSync.pushUser(partyUser)
+                FirebaseFirestoreSync.pushQuiz(q1)
+                FirebaseFirestoreSync.pushQuiz(q2)
+                questions.forEach { FirebaseFirestoreSync.pushQuestion(it) }
+                FirebaseFirestoreSync.pushSponsor(s1)
+                FirebaseFirestoreSync.pushSponsor(s2)
+                FirebaseFirestoreSync.pushAnnouncement(an1)
+                FirebaseFirestoreSync.pushAnnouncement(an2)
+                testLeaders.forEach { FirebaseFirestoreSync.pushLeaderboardEntry(it) }
+                Log.i("QuizRepository", "Successfully uploaded all seed data to remote Firestore backend!")
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed uploading seed data to remote: ${e.message}")
+            }
+        }
     }
 }
