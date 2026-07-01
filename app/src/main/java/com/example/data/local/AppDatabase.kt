@@ -13,11 +13,11 @@ import androidx.room.RoomDatabase
         QuestionEntity::class,
         QuizAttemptEntity::class,
         LeaderboardEntity::class,
-        AuditLogEntity::class,
         SponsorEntity::class,
-        AnnouncementEntity::class
+        AnnouncementEntity::class,
+        AuditLogEntity::class
     ],
-    version = 3,
+    version = 1,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

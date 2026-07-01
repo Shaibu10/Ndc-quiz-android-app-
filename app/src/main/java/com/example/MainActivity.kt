@@ -12,6 +12,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.AppDatabase
+import com.example.data.preferences.UserPreferences
+import com.example.data.preferences.dataStore
 import com.example.data.repository.SupabaseOfflineFirstQuizRepository
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
@@ -44,9 +46,10 @@ class MainActivity : ComponentActivity() {
         val database = AppDatabase.getDatabase(applicationContext)
         val quizAppDao = database.quizAppDao()
         val repository = SupabaseOfflineFirstQuizRepository(quizAppDao)
+        val userPreferences = UserPreferences(applicationContext.dataStore)
 
         // ViewModels
-        val authViewModel = AuthViewModel(repository)
+        val authViewModel = AuthViewModel(repository, userPreferences)
         val quizViewModel = QuizViewModel(repository)
 
         setContent {
@@ -307,6 +310,39 @@ class MainActivity : ComponentActivity() {
                                             fontSize = 12.sp,
                                             lineHeight = 16.sp
                                         )
+                                        if (!activeAlert.linkUrl.isNullOrBlank()) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            val currentUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                                            val currentContext = androidx.compose.ui.platform.LocalContext.current
+                                            Button(
+                                                onClick = {
+                                                    val rawUrl = activeAlert.linkUrl
+                                                    val cleanUrl = if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
+                                                        "https://$rawUrl"
+                                                    } else {
+                                                        rawUrl
+                                                    }
+                                                    try {
+                                                        currentUriHandler.openUri(cleanUrl)
+                                                    } catch (e: Exception) {
+                                                        android.widget.Toast.makeText(currentContext, "Could not open link", android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)), // NDCGreen
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(34.dp)
+                                            ) {
+                                                Text(
+                                                    text = if (!activeAlert.linkLabel.isNullOrBlank()) activeAlert.linkLabel.uppercase() else "LEARN MORE",
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                        }
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     IconButton(

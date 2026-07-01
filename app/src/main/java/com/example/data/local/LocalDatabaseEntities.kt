@@ -11,13 +11,13 @@ data class UserEntity(
     val email: String,
     val region: String,
     val constituency: String,
-    val role: String, // User, Admin, Super Admin
-    val status: String, // Active, Suspended, Deleted
+    val role: String,
+    val status: String,
     val profilePhoto: String,
     val passwordHash: String,
+    val languagePreference: String = "English",
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis(),
-    val languagePreference: String = "English" // English, Twi, Fante, Hausa
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "categories")
@@ -25,9 +25,7 @@ data class CategoryEntity(
     @PrimaryKey val id: String,
     val categoryName: String,
     val categoryImage: String,
-    val description: String,
-    val active: Boolean = true,
-    val createdAt: Long = System.currentTimeMillis()
+    val description: String
 )
 
 @Entity(tableName = "quizzes")
@@ -39,16 +37,15 @@ data class QuizEntity(
     val imageUrl: String,
     val sponsorName: String,
     val sponsorLogo: String,
-    val accessCode: String, // Empty if public
+    val accessCode: String,
     val timeLimitMinutes: Int,
-    val active: Boolean = true,
     val startDate: String,
     val endDate: String,
     val totalQuestions: Int,
     val createdBy: String,
-    val createdAt: Long = System.currentTimeMillis(),
-    val sponsorId: String = "",
-    val maxAttempts: Int = 1
+    val sponsorId: String,
+    val maxAttempts: Int,
+    val active: Boolean = true
 )
 
 @Entity(tableName = "questions")
@@ -60,12 +57,12 @@ data class QuestionEntity(
     val optionB: String,
     val optionC: String,
     val optionD: String,
-    val correctAnswer: String, // "A", "B", "C", "D"
+    val correctAnswer: String,
     val explanation: String,
     val imageUrl: String
 )
 
-@Entity(tableName = "quiz_attempts")
+@Entity(tableName = "attempts")
 data class QuizAttemptEntity(
     @PrimaryKey val id: String,
     val userId: String,
@@ -73,8 +70,7 @@ data class QuizAttemptEntity(
     val score: Int,
     val completionTimeSeconds: Long,
     val startedAt: Long,
-    val submittedAt: Long,
-    val synced: Boolean = false
+    val submittedAt: Long
 )
 
 @Entity(tableName = "leaderboard")
@@ -82,14 +78,33 @@ data class LeaderboardEntity(
     @PrimaryKey val id: String,
     val userId: String,
     val userFullName: String,
-    val quizId: String,
-    val categoryId: String,
+    val quizId: String? = null,
+    val categoryId: String? = null,
     val score: Int,
     val completionTimeSeconds: Long,
     val ranking: Int,
-    val timePeriod: String = "Global", // "Global", "Category", "Weekly", "Monthly"
-    val region: String = "",
-    val constituency: String = ""
+    val timePeriod: String = "Global",
+    val region: String,
+    val constituency: String
+)
+
+@Entity(tableName = "sponsors")
+data class SponsorEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val logoUrl: String,
+    val description: String
+)
+
+@Entity(tableName = "announcements")
+data class AnnouncementEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val content: String,
+    val imageUrl: String? = null,
+    val linkUrl: String? = null,
+    val linkLabel: String? = null,
+    val active: Boolean = true
 )
 
 @Entity(tableName = "audit_logs")
@@ -100,27 +115,4 @@ data class AuditLogEntity(
     val action: String,
     val target: String,
     val timestamp: Long = System.currentTimeMillis()
-)
-
-@Entity(tableName = "sponsors")
-data class SponsorEntity(
-    @PrimaryKey val id: String,
-    val name: String,
-    val logoUrl: String,
-    val description: String,
-    val active: Boolean = true
-)
-
-@Entity(tableName = "announcements")
-data class AnnouncementEntity(
-    @PrimaryKey val id: String,
-    val title: String,
-    val content: String,
-    val createdAt: Long = System.currentTimeMillis(),
-    val scheduledAt: Long = System.currentTimeMillis(),
-    val isPushed: Boolean = false,
-    val active: Boolean = true,
-    val imageUrl: String? = null,
-    val linkUrl: String? = null,
-    val linkLabel: String? = null
 )

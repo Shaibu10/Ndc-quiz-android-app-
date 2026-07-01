@@ -2,511 +2,662 @@ package com.example.data.remote
 
 import android.util.Log
 import com.example.data.local.*
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.IOException
-import java.util.UUID
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import com.google.android.gms.tasks.Task
+import kotlinx.coroutines.flow.first
 
 object FirebaseFirestoreSync {
-    private const val TAG = "FirestoreSync"
-    private const val BASE_URL = "https://firestore.googleapis.com/v1/projects/ndc-quiz-android-app/databases/(default)/documents"
-    private val client = OkHttpClient()
-    private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
-    // Helpers to robustly extract types from Firestore fields
-    private fun getStr(fields: JSONObject, key: String, default: String = ""): String {
-        return if (fields.has(key)) {
-            val valueObj = fields.getJSONObject(key)
-            if (valueObj.has("stringValue")) valueObj.getString("stringValue") else default
-        } else {
-            default
-        }
-    }
-
-    private fun getInt(fields: JSONObject, key: String, default: Int = 0): Int {
-        return if (fields.has(key)) {
-            val valueObj = fields.getJSONObject(key)
-            if (valueObj.has("integerValue")) {
-                valueObj.getString("integerValue").toIntOrNull() ?: default
-            } else if (valueObj.has("doubleValue")) {
-                valueObj.getDouble("doubleValue").toInt()
+    // Custom extension to safely await any Android Task with Coroutines without requiring external libraries
+    private suspend fun <T> Task<T>.awaitTask(): T? = suspendCancellableCoroutine { continuation ->
+        addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                continuation.resume(task.result)
             } else {
-                default
+                continuation.resumeWithException(task.exception ?: RuntimeException("Task failed with unknown error"))
             }
-        } else {
-            default
         }
     }
 
-    private fun getLong(fields: JSONObject, key: String, default: Long = 0L): Long {
-        return if (fields.has(key)) {
-            val valueObj = fields.getJSONObject(key)
-            if (valueObj.has("integerValue")) {
-                valueObj.getString("integerValue").toLongOrNull() ?: default
-            } else if (valueObj.has("doubleValue")) {
-                valueObj.getDouble("doubleValue").toLong()
-            } else {
-                default
-            }
-        } else {
-            default
-        }
-    }
-
-    private fun getBool(fields: JSONObject, key: String, default: Boolean = false): Boolean {
-        return if (fields.has(key)) {
-            val valueObj = fields.getJSONObject(key)
-            if (valueObj.has("booleanValue")) valueObj.getBoolean("booleanValue") else default
-        } else {
-            default
-        }
-    }
-
-    // Push standard entity mapping to Firestore Fields JSON
-    private fun mapToFields(map: Map<String, Any?>): JSONObject {
-        val fieldsJson = JSONObject()
-        map.forEach { (key, value) ->
-            val valJson = JSONObject()
-            when (value) {
-                is String -> valJson.put("stringValue", value)
-                is Boolean -> valJson.put("booleanValue", value)
-                is Int -> valJson.put("integerValue", value.toString())
-                is Long -> valJson.put("integerValue", value.toString())
-                is Double -> valJson.put("doubleValue", value)
-                null -> valJson.put("nullValue", JSONObject.NULL)
-                else -> valJson.put("stringValue", value.toString())
-            }
-            fieldsJson.put(key, valJson)
-        }
-        return fieldsJson
-    }
-
-    // Generic function to push a single document to Firebase Firestore
-    suspend fun pushDocument(collection: String, documentId: String, fields: JSONObject): Boolean = withContext(Dispatchers.IO) {
-        val url = "$BASE_URL/$collection/$documentId"
-        val requestBody = JSONObject().apply {
-            put("fields", fields)
-        }.toString().toRequestBody(JSON_MEDIA_TYPE)
-
-        val request = Request.Builder()
-            .url(url)
-            .patch(requestBody) // Use PATCH to create or update
-            .build()
-
+    suspend fun pushUser(user: UserEntity) {
         try {
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    Log.d(TAG, "Successfully pushed document $documentId to $collection")
-                    true
-                } else {
-                    Log.e(TAG, "Failed pushing document $documentId to $collection: ${response.code} ${response.message}")
-                    false
-                }
-            }
+            val db = FirebaseFirestore.getInstance()
+            val userMap = mapOf(
+                "id" to user.id,
+                "fullName" to user.fullName,
+                "phoneNumber" to user.phoneNumber,
+                "email" to user.email,
+                "region" to user.region,
+                "constituency" to user.constituency,
+                "role" to user.role,
+                "status" to user.status,
+                "profilePhoto" to user.profilePhoto,
+                "passwordHash" to user.passwordHash,
+                "languagePreference" to user.languagePreference,
+                "createdAt" to user.createdAt,
+                "updatedAt" to user.updatedAt
+            )
+            db.collection("users").document(user.id).set(userMap).awaitTask()
+            Log.d("FirebaseSync", "Successfully pushed user to Firestore: ${user.fullName}")
         } catch (e: Exception) {
-            Log.e(TAG, "Network error pushing document $collection/$documentId: ${e.message}")
-            false
+            Log.e("FirebaseSync", "Error pushing user: ${e.message}", e)
+            throw e
         }
     }
 
-    // Generic function to pull check list of documents from Firestore
-    private suspend fun fetchCollectionDocuments(collection: String): JSONArray = withContext(Dispatchers.IO) {
-        val url = "$BASE_URL/$collection?pageSize=300"
-        val request = Request.Builder()
-            .url(url)
-            .get()
-            .build()
-
+    suspend fun pushCategory(category: CategoryEntity) {
         try {
-            client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    val bodyStr = response.body?.string() ?: "{}"
-                    val jsonResponse = JSONObject(bodyStr)
-                    if (jsonResponse.has("documents")) {
-                        jsonResponse.getJSONArray("documents")
-                    } else {
-                        JSONArray() // No documents found
-                    }
-                } else {
-                    Log.e(TAG, "Failed fetching collection $collection: code ${response.code}")
-                    JSONArray()
-                }
-            }
+            val db = FirebaseFirestore.getInstance()
+            val categoryMap = mapOf(
+                "id" to category.id,
+                "categoryName" to category.categoryName,
+                "categoryImage" to category.categoryImage,
+                "description" to category.description
+            )
+            db.collection("categories").document(category.id).set(categoryMap).awaitTask()
+            Log.d("FirebaseSync", "Successfully pushed category to Firestore: ${category.categoryName}")
         } catch (e: Exception) {
-            Log.e(TAG, "Network error fetching collection $collection: ${e.message}")
-            JSONArray()
+            Log.e("FirebaseSync", "Error pushing category: ${e.message}", e)
+            throw e
         }
     }
 
-    // Sync categories from Firestore
-    suspend fun syncCategories(quizAppDao: QuizAppDao) {
-        val docsArray = fetchCollectionDocuments("categories")
-        if (docsArray.length() == 0) return
-        
-        for (i in 0 until docsArray.length()) {
-            try {
-                val docObj = docsArray.getJSONObject(i)
-                val fields = docObj.getJSONObject("fields")
-                val category = CategoryEntity(
-                    id = getStr(fields, "id"),
-                    categoryName = getStr(fields, "categoryName"),
-                    categoryImage = getStr(fields, "categoryImage"),
-                    description = getStr(fields, "description"),
-                    active = getBool(fields, "active"),
-                    createdAt = getLong(fields, "createdAt")
-                )
-                quizAppDao.insertCategory(category)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error parsing Category document at $i: ${e.message}")
-            }
+    suspend fun pushQuiz(quiz: QuizEntity) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val quizMap = mapOf(
+                "id" to quiz.id,
+                "categoryId" to quiz.categoryId,
+                "title" to quiz.title,
+                "description" to quiz.description,
+                "imageUrl" to quiz.imageUrl,
+                "sponsorName" to quiz.sponsorName,
+                "sponsorLogo" to quiz.sponsorLogo,
+                "accessCode" to quiz.accessCode,
+                "timeLimitMinutes" to quiz.timeLimitMinutes,
+                "startDate" to quiz.startDate,
+                "endDate" to quiz.endDate,
+                "totalQuestions" to quiz.totalQuestions,
+                "createdBy" to quiz.createdBy,
+                "sponsorId" to quiz.sponsorId,
+                "maxAttempts" to quiz.maxAttempts,
+                "active" to quiz.active
+            )
+            db.collection("quizzes").document(quiz.id).set(quizMap).awaitTask()
+            Log.d("FirebaseSync", "Successfully pushed quiz to Firestore: ${quiz.title}")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error pushing quiz: ${e.message}", e)
+            throw e
         }
     }
 
-    // Sync quizzes from Firestore
-    suspend fun syncQuizzes(quizAppDao: QuizAppDao) {
-        val docsArray = fetchCollectionDocuments("quizzes")
-        if (docsArray.length() == 0) return
-
-        for (i in 0 until docsArray.length()) {
-            try {
-                val docObj = docsArray.getJSONObject(i)
-                val fields = docObj.getJSONObject("fields")
-                val quiz = QuizEntity(
-                    id = getStr(fields, "id"),
-                    categoryId = getStr(fields, "categoryId"),
-                    title = getStr(fields, "title"),
-                    description = getStr(fields, "description"),
-                    imageUrl = getStr(fields, "imageUrl"),
-                    sponsorName = getStr(fields, "sponsorName"),
-                    sponsorLogo = getStr(fields, "sponsorLogo"),
-                    accessCode = getStr(fields, "accessCode"),
-                    timeLimitMinutes = getInt(fields, "timeLimitMinutes"),
-                    active = getBool(fields, "active"),
-                    startDate = getStr(fields, "startDate"),
-                    endDate = getStr(fields, "endDate"),
-                    totalQuestions = getInt(fields, "totalQuestions"),
-                    createdBy = getStr(fields, "createdBy"),
-                    createdAt = getLong(fields, "createdAt"),
-                    sponsorId = getStr(fields, "sponsorId"),
-                    maxAttempts = getInt(fields, "maxAttempts")
-                )
-                quizAppDao.insertQuiz(quiz)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error parsing Quiz document at $i: ${e.message}")
-            }
+    suspend fun pushQuestion(question: QuestionEntity) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val questionMap = mapOf(
+                "id" to question.id,
+                "quizId" to question.quizId,
+                "questionText" to question.questionText,
+                "optionA" to question.optionA,
+                "optionB" to question.optionB,
+                "optionC" to question.optionC,
+                "optionD" to question.optionD,
+                "correctAnswer" to question.correctAnswer,
+                "explanation" to question.explanation,
+                "imageUrl" to question.imageUrl
+            )
+            db.collection("questions").document(question.id).set(questionMap).awaitTask()
+            Log.d("FirebaseSync", "Successfully pushed question to Firestore: ${question.id}")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error pushing question: ${e.message}", e)
+            throw e
         }
     }
 
-    // Sync questions from Firestore
-    suspend fun syncQuestions(quizAppDao: QuizAppDao) {
-        val docsArray = fetchCollectionDocuments("questions")
-        if (docsArray.length() == 0) return
-
-        for (i in 0 until docsArray.length()) {
-            try {
-                val docObj = docsArray.getJSONObject(i)
-                val fields = docObj.getJSONObject("fields")
-                val question = QuestionEntity(
-                    id = getStr(fields, "id"),
-                    quizId = getStr(fields, "quizId"),
-                    questionText = getStr(fields, "questionText"),
-                    optionA = getStr(fields, "optionA"),
-                    optionB = getStr(fields, "optionB"),
-                    optionC = getStr(fields, "optionC"),
-                    optionD = getStr(fields, "optionD"),
-                    correctAnswer = getStr(fields, "correctAnswer"),
-                    explanation = getStr(fields, "explanation"),
-                    imageUrl = getStr(fields, "imageUrl")
-                )
-                quizAppDao.insertQuestion(question)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error parsing Question document at $i: ${e.message}")
-            }
+    suspend fun pushLeaderboardEntry(entry: LeaderboardEntity) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val entryMap = mapOf(
+                "id" to entry.id,
+                "userId" to entry.userId,
+                "userFullName" to entry.userFullName,
+                "quizId" to entry.quizId,
+                "categoryId" to entry.categoryId,
+                "score" to entry.score,
+                "completionTimeSeconds" to entry.completionTimeSeconds,
+                "ranking" to entry.ranking,
+                "timePeriod" to entry.timePeriod,
+                "region" to entry.region,
+                "constituency" to entry.constituency
+            )
+            db.collection("leaderboard").document(entry.id).set(entryMap).awaitTask()
+            Log.d("FirebaseSync", "Successfully pushed leaderboard entry to Firestore: ${entry.userFullName}")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error pushing leaderboard entry: ${e.message}", e)
+            throw e
         }
     }
 
-    // Sync sponsors from Firestore
-    suspend fun syncSponsors(quizAppDao: QuizAppDao) {
-        val docsArray = fetchCollectionDocuments("sponsors")
-        if (docsArray.length() == 0) return
-
-        for (i in 0 until docsArray.length()) {
-            try {
-                val docObj = docsArray.getJSONObject(i)
-                val fields = docObj.getJSONObject("fields")
-                val sponsor = SponsorEntity(
-                    id = getStr(fields, "id"),
-                    name = getStr(fields, "name"),
-                    logoUrl = getStr(fields, "logoUrl"),
-                    description = getStr(fields, "description"),
-                    active = getBool(fields, "active")
-                )
-                quizAppDao.insertSponsor(sponsor)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error parsing Sponsor document at $i: ${e.message}")
-            }
+    suspend fun pushSponsor(sponsor: SponsorEntity) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val sponsorMap = mapOf(
+                "id" to sponsor.id,
+                "name" to sponsor.name,
+                "logoUrl" to sponsor.logoUrl,
+                "description" to sponsor.description
+            )
+            db.collection("sponsors").document(sponsor.id).set(sponsorMap).awaitTask()
+            Log.d("FirebaseSync", "Successfully pushed sponsor to Firestore: ${sponsor.name}")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error pushing sponsor: ${e.message}", e)
+            throw e
         }
     }
 
-    // Sync announcements from Firestore
-    suspend fun syncAnnouncements(quizAppDao: QuizAppDao) {
-        val docsArray = fetchCollectionDocuments("announcements")
-        if (docsArray.length() == 0) return
-
-        for (i in 0 until docsArray.length()) {
-            try {
-                val docObj = docsArray.getJSONObject(i)
-                val fields = docObj.getJSONObject("fields")
-                val announcement = AnnouncementEntity(
-                    id = getStr(fields, "id"),
-                    title = getStr(fields, "title"),
-                    content = getStr(fields, "content"),
-                    createdAt = getLong(fields, "createdAt"),
-                    scheduledAt = getLong(fields, "scheduledAt"),
-                    isPushed = getBool(fields, "isPushed"),
-                    active = getBool(fields, "active"),
-                    imageUrl = if (fields.has("imageUrl") && !fields.getJSONObject("imageUrl").has("nullValue")) getStr(fields, "imageUrl") else null,
-                    linkUrl = if (fields.has("linkUrl") && !fields.getJSONObject("linkUrl").has("nullValue")) getStr(fields, "linkUrl") else null,
-                    linkLabel = if (fields.has("linkLabel") && !fields.getJSONObject("linkLabel").has("nullValue")) getStr(fields, "linkLabel") else null
-                )
-                quizAppDao.insertAnnouncement(announcement)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error parsing Announcement document at $i: ${e.message}")
-            }
+    suspend fun pushAnnouncement(announcement: AnnouncementEntity) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val map = mapOf(
+                "id" to announcement.id,
+                "title" to announcement.title,
+                "content" to announcement.content,
+                "imageUrl" to announcement.imageUrl,
+                "linkUrl" to announcement.linkUrl,
+                "linkLabel" to announcement.linkLabel,
+                "active" to announcement.active
+            )
+            db.collection("announcements").document(announcement.id).set(map).awaitTask()
+            Log.d("FirebaseSync", "Successfully pushed announcement to Firestore: ${announcement.title}")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error pushing announcement: ${e.message}", e)
+            throw e
         }
     }
 
-    // Sync leaderboard from Firestore
-    suspend fun syncLeaderboard(quizAppDao: QuizAppDao) {
-        val docsArray = fetchCollectionDocuments("leaderboard")
-        if (docsArray.length() == 0) return
-
-        val entries = ArrayList<LeaderboardEntity>()
-        for (i in 0 until docsArray.length()) {
-            try {
-                val docObj = docsArray.getJSONObject(i)
-                val fields = docObj.getJSONObject("fields")
-                val entry = LeaderboardEntity(
-                    id = getStr(fields, "id"),
-                    userId = getStr(fields, "userId"),
-                    userFullName = getStr(fields, "userFullName"),
-                    quizId = getStr(fields, "quizId"),
-                    categoryId = getStr(fields, "categoryId"),
-                    score = getInt(fields, "score"),
-                    completionTimeSeconds = getLong(fields, "completionTimeSeconds"),
-                    ranking = getInt(fields, "ranking"),
-                    timePeriod = getStr(fields, "timePeriod"),
-                    region = getStr(fields, "region"),
-                    constituency = getStr(fields, "constituency")
-                )
-                entries.add(entry)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error parsing Leaderboard document at $i: ${e.message}")
-            }
-        }
-        if (entries.isNotEmpty()) {
-            quizAppDao.insertLeaderboardEntries(entries)
+    suspend fun pushAuditLog(log: AuditLogEntity) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val logMap = mapOf(
+                "id" to log.id,
+                "adminId" to log.adminId,
+                "adminName" to log.adminName,
+                "action" to log.action,
+                "target" to log.target,
+                "timestamp" to log.timestamp
+            )
+            db.collection("audit_logs").document(log.id).set(logMap).awaitTask()
+            Log.d("FirebaseSync", "Successfully pushed audit log to Firestore: ${log.action}")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error pushing audit log: ${e.message}", e)
+            throw e
         }
     }
 
-    // Sync users from Firestore
-    suspend fun syncUsers(quizAppDao: QuizAppDao) {
-        val docsArray = fetchCollectionDocuments("users")
-        if (docsArray.length() == 0) return
-
-        for (i in 0 until docsArray.length()) {
-            try {
-                val docObj = docsArray.getJSONObject(i)
-                val fields = docObj.getJSONObject("fields")
-                val user = UserEntity(
-                    id = getStr(fields, "id"),
-                    fullName = getStr(fields, "fullName"),
-                    phoneNumber = getStr(fields, "phoneNumber"),
-                    email = getStr(fields, "email"),
-                    region = getStr(fields, "region"),
-                    constituency = getStr(fields, "constituency"),
-                    role = getStr(fields, "role"),
-                    status = getStr(fields, "status"),
-                    profilePhoto = getStr(fields, "profilePhoto"),
-                    passwordHash = getStr(fields, "passwordHash"),
-                    createdAt = getLong(fields, "createdAt"),
-                    updatedAt = getLong(fields, "updatedAt"),
-                    languagePreference = getStr(fields, "languagePreference")
-                )
-                quizAppDao.insertUser(user)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error parsing User document at $i: ${e.message}")
-            }
-        }
-    }
-
-    // Sync audit logs from Firestore
-    suspend fun syncAuditLogs(quizAppDao: QuizAppDao) {
-        val docsArray = fetchCollectionDocuments("audit_logs")
-        if (docsArray.length() == 0) return
-
-        for (i in 0 until docsArray.length()) {
-            try {
-                val docObj = docsArray.getJSONObject(i)
-                val fields = docObj.getJSONObject("fields")
-                val log = AuditLogEntity(
-                    id = getStr(fields, "id"),
-                    adminId = getStr(fields, "adminId"),
-                    adminName = getStr(fields, "adminName"),
-                    action = getStr(fields, "action"),
-                    target = getStr(fields, "target"),
-                    timestamp = getLong(fields, "timestamp")
-                )
-                quizAppDao.insertAuditLog(log)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error parsing Audit Log document at $i: ${e.message}")
-            }
-        }
-    }
-
-    // Perform complete pull sync of all collections
     suspend fun performanceCompleteSync(quizAppDao: QuizAppDao) {
-        Log.i(TAG, "Starting complete pull synchronization from Firestore...")
-        syncCategories(quizAppDao)
-        syncQuizzes(quizAppDao)
-        syncQuestions(quizAppDao)
-        syncSponsors(quizAppDao)
-        syncAnnouncements(quizAppDao)
-        syncLeaderboard(quizAppDao)
-        syncUsers(quizAppDao)
-        syncAuditLogs(quizAppDao)
-        Log.i(TAG, "Finished complete pull synchronization.")
+        try {
+            val db = FirebaseFirestore.getInstance()
+            Log.d("FirebaseSync", "Initializing remote sync (PULL from Firestore)...")
+
+            // 1. Fetch categories
+            val categoriesSnap = db.collection("categories").get().awaitTask()
+            if (categoriesSnap != null && !categoriesSnap.isEmpty) {
+                for (doc in categoriesSnap.documents) {
+                    val id = doc.id
+                    val categoryName = doc.getString("categoryName") ?: ""
+                    val categoryImage = doc.getString("categoryImage") ?: ""
+                    val description = doc.getString("description") ?: ""
+                    quizAppDao.insertCategory(CategoryEntity(id, categoryName, categoryImage, description))
+                }
+                Log.d("FirebaseSync", "Pulled ${categoriesSnap.size()} categories from Firestore")
+            }
+
+            // 2. Fetch users
+            val usersSnap = db.collection("users").get().awaitTask()
+            if (usersSnap != null && !usersSnap.isEmpty) {
+                for (doc in usersSnap.documents) {
+                    val id = doc.id
+                    val fullName = doc.getString("fullName") ?: ""
+                    val phoneNumber = doc.getString("phoneNumber") ?: ""
+                    val email = doc.getString("email") ?: ""
+                    val region = doc.getString("region") ?: ""
+                    val constituency = doc.getString("constituency") ?: ""
+                    val role = doc.getString("role") ?: ""
+                    val status = doc.getString("status") ?: ""
+                    val profilePhoto = doc.getString("profilePhoto") ?: ""
+                    val passwordHash = doc.getString("passwordHash") ?: ""
+                    val languagePreference = doc.getString("languagePreference") ?: "English"
+                    val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
+                    val updatedAt = doc.getLong("updatedAt") ?: System.currentTimeMillis()
+                    quizAppDao.insertUser(
+                        UserEntity(
+                            id = id,
+                            fullName = fullName,
+                            phoneNumber = phoneNumber,
+                            email = email,
+                            region = region,
+                            constituency = constituency,
+                            role = role,
+                            status = status,
+                            profilePhoto = profilePhoto,
+                            passwordHash = passwordHash,
+                            languagePreference = languagePreference,
+                            createdAt = createdAt,
+                            updatedAt = updatedAt
+                        )
+                    )
+                }
+                Log.d("FirebaseSync", "Pulled ${usersSnap.size()} users from Firestore")
+            }
+
+            // 3. Fetch quizzes
+            val quizzesSnap = db.collection("quizzes").get().awaitTask()
+            if (quizzesSnap != null && !quizzesSnap.isEmpty) {
+                for (doc in quizzesSnap.documents) {
+                    val id = doc.id
+                    val categoryId = doc.getString("categoryId") ?: ""
+                    val title = doc.getString("title") ?: ""
+                    val description = doc.getString("description") ?: ""
+                    val imageUrl = doc.getString("imageUrl") ?: ""
+                    val sponsorName = doc.getString("sponsorName") ?: ""
+                    val sponsorLogo = doc.getString("sponsorLogo") ?: ""
+                    val accessCode = doc.getString("accessCode") ?: ""
+                    val timeLimitMinutes = doc.getLong("timeLimitMinutes")?.toInt() ?: 15
+                    val startDate = doc.getString("startDate") ?: ""
+                    val endDate = doc.getString("endDate") ?: ""
+                    val totalQuestions = doc.getLong("totalQuestions")?.toInt() ?: 10
+                    val createdBy = doc.getString("createdBy") ?: ""
+                    val sponsorId = doc.getString("sponsorId") ?: ""
+                    val maxAttempts = doc.getLong("maxAttempts")?.toInt() ?: 3
+                    val active = doc.getBoolean("active") ?: true
+                    quizAppDao.insertQuiz(
+                        QuizEntity(
+                            id = id,
+                            categoryId = categoryId,
+                            title = title,
+                            description = description,
+                            imageUrl = imageUrl,
+                            sponsorName = sponsorName,
+                            sponsorLogo = sponsorLogo,
+                            accessCode = accessCode,
+                            timeLimitMinutes = timeLimitMinutes,
+                            startDate = startDate,
+                            endDate = endDate,
+                            totalQuestions = totalQuestions,
+                            createdBy = createdBy,
+                            sponsorId = sponsorId,
+                            maxAttempts = maxAttempts,
+                            active = active
+                        )
+                    )
+                }
+                Log.d("FirebaseSync", "Pulled ${quizzesSnap.size()} quizzes from Firestore")
+            }
+
+            // 4. Fetch questions
+            val questionsSnap = db.collection("questions").get().awaitTask()
+            if (questionsSnap != null && !questionsSnap.isEmpty) {
+                val qList = mutableListOf<QuestionEntity>()
+                for (doc in questionsSnap.documents) {
+                    val id = doc.id
+                    val quizId = doc.getString("quizId") ?: ""
+                    val questionText = doc.getString("questionText") ?: ""
+                    val optionA = doc.getString("optionA") ?: ""
+                    val optionB = doc.getString("optionB") ?: ""
+                    val optionC = doc.getString("optionC") ?: ""
+                    val optionD = doc.getString("optionD") ?: ""
+                    val correctAnswer = doc.getString("correctAnswer") ?: ""
+                    val explanation = doc.getString("explanation") ?: ""
+                    val imageUrl = doc.getString("imageUrl") ?: ""
+                    qList.add(
+                        QuestionEntity(
+                            id = id,
+                            quizId = quizId,
+                            questionText = questionText,
+                            optionA = optionA,
+                            optionB = optionB,
+                            optionC = optionC,
+                            optionD = optionD,
+                            correctAnswer = correctAnswer,
+                            explanation = explanation,
+                            imageUrl = imageUrl
+                        )
+                    )
+                }
+                if (qList.isNotEmpty()) {
+                    quizAppDao.insertQuestions(qList)
+                }
+                Log.d("FirebaseSync", "Pulled ${questionsSnap.size()} questions from Firestore")
+            }
+
+            // 5. Fetch leaderboard
+            val leaderboardSnap = db.collection("leaderboard").get().awaitTask()
+            if (leaderboardSnap != null && !leaderboardSnap.isEmpty) {
+                val lEntries = mutableListOf<LeaderboardEntity>()
+                for (doc in leaderboardSnap.documents) {
+                    val id = doc.id
+                    val userId = doc.getString("userId") ?: ""
+                    val userFullName = doc.getString("userFullName") ?: ""
+                    val quizId = doc.getString("quizId")
+                    val categoryId = doc.getString("categoryId")
+                    val score = doc.getLong("score")?.toInt() ?: 0
+                    val completionTimeSeconds = doc.getLong("completionTimeSeconds") ?: 0L
+                    val ranking = doc.getLong("ranking")?.toInt() ?: 0
+                    val timePeriod = doc.getString("timePeriod") ?: "Global"
+                    val region = doc.getString("region") ?: ""
+                    val constituency = doc.getString("constituency") ?: ""
+                    lEntries.add(
+                        LeaderboardEntity(
+                            id = id,
+                            userId = userId,
+                            userFullName = userFullName,
+                            quizId = quizId,
+                            categoryId = categoryId,
+                            score = score,
+                            completionTimeSeconds = completionTimeSeconds,
+                            ranking = ranking,
+                            timePeriod = timePeriod,
+                            region = region,
+                            constituency = constituency
+                        )
+                    )
+                }
+                if (lEntries.isNotEmpty()) {
+                    quizAppDao.insertLeaderboardEntries(lEntries)
+                }
+                Log.d("FirebaseSync", "Pulled ${leaderboardSnap.size()} leaderboard entries from Firestore")
+            }
+
+            // 6. Fetch sponsors
+            val sponsorsSnap = db.collection("sponsors").get().awaitTask()
+            if (sponsorsSnap != null && !sponsorsSnap.isEmpty) {
+                for (doc in sponsorsSnap.documents) {
+                    val id = doc.id
+                    val name = doc.getString("name") ?: ""
+                    val logoUrl = doc.getString("logoUrl") ?: ""
+                    val description = doc.getString("description") ?: ""
+                    quizAppDao.insertSponsor(SponsorEntity(id, name, logoUrl, description))
+                }
+                Log.d("FirebaseSync", "Pulled ${sponsorsSnap.size()} sponsors from Firestore")
+            }
+
+            // 7. Fetch announcements
+            val announcementsSnap = db.collection("announcements").get().awaitTask()
+            if (announcementsSnap != null && !announcementsSnap.isEmpty) {
+                for (doc in announcementsSnap.documents) {
+                    val id = doc.id
+                    val title = doc.getString("title") ?: ""
+                    val content = doc.getString("content") ?: ""
+                    val imageUrl = doc.getString("imageUrl")
+                    val linkUrl = doc.getString("linkUrl")
+                    val linkLabel = doc.getString("linkLabel")
+                    val active = doc.getBoolean("active") ?: true
+                    quizAppDao.insertAnnouncement(
+                        AnnouncementEntity(
+                            id = id,
+                            title = title,
+                            content = content,
+                            imageUrl = imageUrl,
+                            linkUrl = linkUrl,
+                            linkLabel = linkLabel,
+                            active = active
+                        )
+                    )
+                }
+                Log.d("FirebaseSync", "Pulled ${announcementsSnap.size()} announcements from Firestore")
+            }
+
+            // 8. Fetch audit logs
+            val logsSnap = db.collection("audit_logs").get().awaitTask()
+            if (logsSnap != null && !logsSnap.isEmpty) {
+                for (doc in logsSnap.documents) {
+                    val id = doc.id
+                    val adminId = doc.getString("adminId") ?: ""
+                    val adminName = doc.getString("adminName") ?: ""
+                    val action = doc.getString("action") ?: ""
+                    val target = doc.getString("target") ?: ""
+                    val timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                    quizAppDao.insertAuditLog(AuditLogEntity(id, adminId, adminName, action, target, timestamp))
+                }
+                Log.d("FirebaseSync", "Pulled ${logsSnap.size()} audit logs from Firestore")
+            }
+
+            Log.d("FirebaseSync", "Remote database sync (PULL) completed successfully.")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error pulling during complete sync: ${e.message}", e)
+        }
     }
 
-    // Pushes supporting functions
-    suspend fun pushCategory(category: CategoryEntity): Boolean {
-        val fields = mapToFields(mapOf(
-            "id" to category.id,
-            "categoryName" to category.categoryName,
-            "categoryImage" to category.categoryImage,
-            "description" to category.description,
-            "active" to category.active,
-            "createdAt" to category.createdAt
-        ))
-        return pushDocument("categories", category.id, fields)
+    suspend fun runDiagnostics(): Result<String> {
+        return try {
+            val db = FirebaseFirestore.getInstance()
+            val testDocId = "test_diag_" + System.currentTimeMillis()
+            val testMap = mapOf(
+                "status" to "healthy",
+                "timestamp" to System.currentTimeMillis(),
+                "device" to android.os.Build.MODEL
+            )
+            
+            // 1. Try to Write
+            db.collection("diagnostics").document(testDocId).set(testMap).awaitTask()
+            
+            // 2. Try to Read
+            val doc = db.collection("diagnostics").document(testDocId).get().awaitTask()
+            if (doc == null || !doc.exists()) {
+                throw Exception("Written test document could not be retrieved from Firestore.")
+            }
+            
+            // 3. Try to Delete
+            db.collection("diagnostics").document(testDocId).delete().awaitTask()
+            
+            Result.success("Success! Firebase connection is fully functional and writing to Firestore is allowed.")
+        } catch (e: Exception) {
+            val msg = e.message ?: "Unknown error"
+            val resolution = when {
+                msg.contains("PERMISSION_DENIED", ignoreCase = true) -> 
+                    "PERMISSION_DENIED: Insufficient permissions.\n\nResolution: Go to your Firebase Console -> Firestore Database -> Rules tab, and update your security rules to allow read/write access (e.g., set 'allow read, write: if true;')."
+                msg.contains("UNAVAILABLE", ignoreCase = true) -> 
+                    "UNAVAILABLE: Cannot connect to Firestore.\n\nResolution: Ensure your device has internet access and that you have initialized the 'Cloud Firestore' database in your Firebase Console for the project 'ndc-quiz-android-app'."
+                else -> "Error: $msg\n\nResolution: Please verify that you have registered the package name 'com.aistudio.quizapp.abcdef' in your Firebase project settings and generated the correct google-services.json."
+            }
+            Result.failure(Exception(resolution))
+        }
     }
 
-    suspend fun pushQuiz(quiz: QuizEntity): Boolean {
-        val fields = mapToFields(mapOf(
-            "id" to quiz.id,
-            "categoryId" to quiz.categoryId,
-            "title" to quiz.title,
-            "description" to quiz.description,
-            "imageUrl" to quiz.imageUrl,
-            "sponsorName" to quiz.sponsorName,
-            "sponsorLogo" to quiz.sponsorLogo,
-            "accessCode" to quiz.accessCode,
-            "timeLimitMinutes" to quiz.timeLimitMinutes,
-            "active" to quiz.active,
-            "startDate" to quiz.startDate,
-            "endDate" to quiz.endDate,
-            "totalQuestions" to quiz.totalQuestions,
-            "createdBy" to quiz.createdBy,
-            "createdAt" to quiz.createdAt,
-            "sponsorId" to quiz.sponsorId,
-            "maxAttempts" to quiz.maxAttempts
-        ))
-        return pushDocument("quizzes", quiz.id, fields)
+    suspend fun forceUploadAll(quizAppDao: QuizAppDao): Result<String> {
+        return try {
+            val categoriesList = quizAppDao.getAllCategoriesFlow().first()
+            val usersList = quizAppDao.getAllUsersFlow().first()
+            val quizzesList = quizAppDao.getAllQuizzesFlow().first()
+            val sponsorsList = quizAppDao.getAllSponsorsFlow().first()
+            val announcementsList = quizAppDao.getAllAnnouncementsFlow().first()
+            val auditLogsList = quizAppDao.getAllAuditLogsFlow().first()
+            
+            var catCount = 0
+            var userCount = 0
+            var quizCount = 0
+            var qnCount = 0
+            var spCount = 0
+            var anCount = 0
+            var logCount = 0
+            
+            for (cat in categoriesList) {
+                pushCategory(cat)
+                catCount++
+            }
+            for (user in usersList) {
+                pushUser(user)
+                userCount++
+            }
+            for (quiz in quizzesList) {
+                pushQuiz(quiz)
+                quizCount++
+                val questions = quizAppDao.getQuestionsByQuiz(quiz.id)
+                for (question in questions) {
+                    pushQuestion(question)
+                    qnCount++
+                }
+            }
+            for (sponsor in sponsorsList) {
+                pushSponsor(sponsor)
+                spCount++
+            }
+            for (announcement in announcementsList) {
+                pushAnnouncement(announcement)
+                anCount++
+            }
+            for (log in auditLogsList) {
+                pushAuditLog(log)
+                logCount++
+            }
+            
+            Result.success("Fully synchronized with Firestore!\n\nUploaded:\n• $catCount categories\n• $userCount users\n• $quizCount quizzes ($qnCount questions)\n• $spCount sponsors\n• $anCount announcements\n• $logCount audit logs.")
+        } catch (e: Exception) {
+            Result.failure(Exception("Sync failed: ${e.message}\n\nPlease run Firebase Diagnostics to troubleshoot connection issues."))
+        }
     }
 
-    suspend fun pushQuestion(question: QuestionEntity): Boolean {
-        val fields = mapToFields(mapOf(
-            "id" to question.id,
-            "quizId" to question.quizId,
-            "questionText" to question.questionText,
-            "optionA" to question.optionA,
-            "optionB" to question.optionB,
-            "optionC" to question.optionC,
-            "optionD" to question.optionD,
-            "correctAnswer" to question.correctAnswer,
-            "explanation" to question.explanation,
-            "imageUrl" to question.imageUrl
-        ))
-        return pushDocument("questions", question.id, fields)
+    suspend fun deleteUser(userId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("users").document(userId).delete().awaitTask()
+            Log.d("FirebaseSync", "Successfully deleted user from Firestore: $userId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting user: ${e.message}", e)
+            throw e
+        }
     }
 
-    suspend fun pushSponsor(sponsor: SponsorEntity): Boolean {
-        val fields = mapToFields(mapOf(
-            "id" to sponsor.id,
-            "name" to sponsor.name,
-            "logoUrl" to sponsor.logoUrl,
-            "description" to sponsor.description,
-            "active" to sponsor.active
-        ))
-        return pushDocument("sponsors", sponsor.id, fields)
+    suspend fun deleteCategory(categoryId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("categories").document(categoryId).delete().awaitTask()
+            Log.d("FirebaseSync", "Successfully deleted category from Firestore: $categoryId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting category: ${e.message}", e)
+            throw e
+        }
     }
 
-    suspend fun pushAnnouncement(announcement: AnnouncementEntity): Boolean {
-        val fields = mapToFields(mapOf(
-            "id" to announcement.id,
-            "title" to announcement.title,
-            "content" to announcement.content,
-            "createdAt" to announcement.createdAt,
-            "scheduledAt" to announcement.scheduledAt,
-            "isPushed" to announcement.isPushed,
-            "active" to announcement.active,
-            "imageUrl" to (announcement.imageUrl ?: ""),
-            "linkUrl" to (announcement.linkUrl ?: ""),
-            "linkLabel" to (announcement.linkLabel ?: "")
-        ))
-        return pushDocument("announcements", announcement.id, fields)
+    suspend fun deleteQuiz(quizId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("quizzes").document(quizId).delete().awaitTask()
+            Log.d("FirebaseSync", "Successfully deleted quiz from Firestore: $quizId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting quiz: ${e.message}", e)
+            throw e
+        }
     }
 
-    suspend fun pushLeaderboardEntry(entry: LeaderboardEntity): Boolean {
-        val fields = mapToFields(mapOf(
-            "id" to entry.id,
-            "userId" to entry.userId,
-            "userFullName" to entry.userFullName,
-            "quizId" to entry.quizId,
-            "categoryId" to entry.categoryId,
-            "score" to entry.score,
-            "completionTimeSeconds" to entry.completionTimeSeconds,
-            "ranking" to entry.ranking,
-            "timePeriod" to entry.timePeriod,
-            "region" to entry.region,
-            "constituency" to entry.constituency
-        ))
-        return pushDocument("leaderboard", entry.id, fields)
+    suspend fun deleteQuestion(questionId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("questions").document(questionId).delete().awaitTask()
+            Log.d("FirebaseSync", "Successfully deleted question from Firestore: $questionId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting question: ${e.message}", e)
+            throw e
+        }
     }
 
-    suspend fun pushUser(user: UserEntity): Boolean {
-        val fields = mapToFields(mapOf(
-            "id" to user.id,
-            "fullName" to user.fullName,
-            "phoneNumber" to user.phoneNumber,
-            "email" to user.email,
-            "region" to user.region,
-            "constituency" to user.constituency,
-            "role" to user.role,
-            "status" to user.status,
-            "profilePhoto" to user.profilePhoto,
-            "passwordHash" to user.passwordHash,
-            "createdAt" to user.createdAt,
-            "updatedAt" to user.updatedAt,
-            "languagePreference" to user.languagePreference
-        ))
-        return pushDocument("users", user.id, fields)
+    suspend fun deleteQuestionsByQuiz(quizId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val snap = db.collection("questions").whereEqualTo("quizId", quizId).get().awaitTask()
+            if (snap != null && !snap.isEmpty) {
+                for (doc in snap.documents) {
+                    db.collection("questions").document(doc.id).delete().awaitTask()
+                }
+            }
+            Log.d("FirebaseSync", "Successfully deleted questions for quiz: $quizId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting questions for quiz: ${e.message}", e)
+            throw e
+        }
     }
 
-    suspend fun pushAuditLog(log: AuditLogEntity): Boolean {
-        val fields = mapToFields(mapOf(
-            "id" to log.id,
-            "adminId" to log.adminId,
-            "adminName" to log.adminName,
-            "action" to log.action,
-            "target" to log.target,
-            "timestamp" to log.timestamp
-        ))
-        return pushDocument("audit_logs", log.id, fields)
+    suspend fun deleteLeaderboardEntry(entryId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("leaderboard").document(entryId).delete().awaitTask()
+            Log.d("FirebaseSync", "Successfully deleted leaderboard entry from Firestore: $entryId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting leaderboard entry: ${e.message}", e)
+            throw e
+        }
+    }
+
+    suspend fun deleteLeaderboardByQuiz(quizId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val snap = db.collection("leaderboard").whereEqualTo("quizId", quizId).get().awaitTask()
+            if (snap != null && !snap.isEmpty) {
+                for (doc in snap.documents) {
+                    db.collection("leaderboard").document(doc.id).delete().awaitTask()
+                }
+            }
+            Log.d("FirebaseSync", "Successfully deleted leaderboard entries for quiz: $quizId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting leaderboard entries for quiz: ${e.message}", e)
+            throw e
+        }
+    }
+
+    suspend fun deleteLeaderboardByCategory(categoryId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val snap = db.collection("leaderboard").whereEqualTo("categoryId", categoryId).get().awaitTask()
+            if (snap != null && !snap.isEmpty) {
+                for (doc in snap.documents) {
+                    db.collection("leaderboard").document(doc.id).delete().awaitTask()
+                }
+            }
+            Log.d("FirebaseSync", "Successfully deleted leaderboard entries for category: $categoryId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting leaderboard entries for category: ${e.message}", e)
+            throw e
+        }
+    }
+
+    suspend fun clearAllLeaderboard() {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val snap = db.collection("leaderboard").get().awaitTask()
+            if (snap != null && !snap.isEmpty) {
+                for (doc in snap.documents) {
+                    db.collection("leaderboard").document(doc.id).delete().awaitTask()
+                }
+            }
+            Log.d("FirebaseSync", "Successfully cleared all leaderboard entries from Firestore")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error clearing leaderboard: ${e.message}", e)
+            throw e
+        }
+    }
+
+    suspend fun deleteSponsor(sponsorId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("sponsors").document(sponsorId).delete().awaitTask()
+            Log.d("FirebaseSync", "Successfully deleted sponsor from Firestore: $sponsorId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting sponsor: ${e.message}", e)
+            throw e
+        }
+    }
+
+    suspend fun deleteAnnouncement(announcementId: String) {
+        try {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("announcements").document(announcementId).delete().awaitTask()
+            Log.d("FirebaseSync", "Successfully deleted announcement from Firestore: $announcementId")
+        } catch (e: Exception) {
+            Log.e("FirebaseSync", "Error deleting announcement: ${e.message}", e)
+            throw e
+        }
     }
 }

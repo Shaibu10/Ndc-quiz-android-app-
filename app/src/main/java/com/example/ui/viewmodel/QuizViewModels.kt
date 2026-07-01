@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.*
+import com.example.data.preferences.UserPreferences
 import com.example.data.repository.QuizRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -10,7 +11,10 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-class AuthViewModel(private val repository: QuizRepository) : ViewModel() {
+class AuthViewModel(
+    private val repository: QuizRepository,
+    private val userPreferences: UserPreferences
+) : ViewModel() {
 
     // Auth states
     val currentUser = repository.currentUserState
@@ -41,6 +45,13 @@ class AuthViewModel(private val repository: QuizRepository) : ViewModel() {
     init {
         viewModelScope.launch {
             repository.checkAndSeedDatabase()
+            
+            // Remember Me
+            userPreferences.userIdFlow.collect { userId ->
+                if (userId != null && repository.currentUserState.value == null) {
+                    repository.loginWithUserId(userId)
+                }
+            }
         }
     }
 
@@ -48,7 +59,7 @@ class AuthViewModel(private val repository: QuizRepository) : ViewModel() {
         _onboardingCompleted.value = true
     }
 
-    fun login(emailOrPhone: String, passwordHash: String, onMainSuccess: (UserEntity) -> Unit) {
+    fun login(emailOrPhone: String, passwordHash: String, rememberMe: Boolean, onMainSuccess: (UserEntity) -> Unit) {
         viewModelScope.launch {
             _isLoading.value = true
             _authError.value = null
@@ -65,6 +76,11 @@ class AuthViewModel(private val repository: QuizRepository) : ViewModel() {
             result.fold(
                 onSuccess = { user ->
                     _isLoading.value = false
+                    if (rememberMe) {
+                        viewModelScope.launch {
+                            userPreferences.saveUserId(user.id)
+                        }
+                    }
                     onMainSuccess(user)
                 },
                 onFailure = { error ->
@@ -195,6 +211,57 @@ class QuizViewModel(private val repository: QuizRepository) : ViewModel() {
         viewModelScope.launch {
             repository.checkAndSeedDatabase()
         }
+    }
+
+    // Firebase diagnostics and sync states
+    private val _firebaseDiagState = MutableStateFlow<String?>(null)
+    val firebaseDiagState = _firebaseDiagState.asStateFlow()
+
+    private val _firebaseSyncState = MutableStateFlow<String?>(null)
+    val firebaseSyncState = _firebaseSyncState.asStateFlow()
+
+    private val _isFirebaseOpLoading = MutableStateFlow(false)
+    val isFirebaseOpLoading = _isFirebaseOpLoading.asStateFlow()
+
+    fun runFirebaseDiagnostics() {
+        viewModelScope.launch {
+            _isFirebaseOpLoading.value = true
+            _firebaseDiagState.value = "Running diagnostics..."
+            val result = repository.runFirebaseDiagnostics()
+            result.fold(
+                onSuccess = {
+                    _firebaseDiagState.value = it
+                    _isFirebaseOpLoading.value = false
+                },
+                onFailure = {
+                    _firebaseDiagState.value = it.message
+                    _isFirebaseOpLoading.value = false
+                }
+            )
+        }
+    }
+
+    fun forceUploadAllToFirebase() {
+        viewModelScope.launch {
+            _isFirebaseOpLoading.value = true
+            _firebaseSyncState.value = "Synchronizing data to remote database..."
+            val result = repository.forceUploadAllToFirebase()
+            result.fold(
+                onSuccess = {
+                    _firebaseSyncState.value = it
+                    _isFirebaseOpLoading.value = false
+                },
+                onFailure = {
+                    _firebaseSyncState.value = it.message
+                    _isFirebaseOpLoading.value = false
+                }
+            )
+        }
+    }
+
+    fun clearFirebaseStatusMessages() {
+        _firebaseDiagState.value = null
+        _firebaseSyncState.value = null
     }
 
     // Set search query
@@ -481,6 +548,36 @@ class QuizViewModel(private val repository: QuizRepository) : ViewModel() {
             )
             repository.insertQuestion(q)
             repository.addAuditLog("MANUAL_QN_ADD", "Added question: '${if (questionText.length > 30) questionText.take(27) + "..." else questionText}' to Quiz ID: $quizId")
+        }
+    }
+
+    fun updateManualQuestion(
+        id: String,
+        quizId: String,
+        questionText: String,
+        optionA: String,
+        optionB: String,
+        optionC: String,
+        optionD: String,
+        correctAnswer: String,
+        explanation: String,
+        imageUrl: String = ""
+    ) {
+        viewModelScope.launch {
+            val q = QuestionEntity(
+                id = id,
+                quizId = quizId,
+                questionText = questionText,
+                optionA = optionA,
+                optionB = optionB,
+                optionC = optionC,
+                optionD = optionD,
+                correctAnswer = correctAnswer,
+                explanation = explanation,
+                imageUrl = imageUrl
+            )
+            repository.insertQuestion(q)
+            repository.addAuditLog("MANUAL_QN_EDIT", "Updated question: '${if (questionText.length > 30) questionText.take(27) + "..." else questionText}' in Quiz ID: $quizId")
         }
     }
 

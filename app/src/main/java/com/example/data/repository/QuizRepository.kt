@@ -21,6 +21,7 @@ interface QuizRepository {
     // Auth
     suspend fun loginWithEmail(email: String, passwordHash: String): Result<UserEntity>
     suspend fun loginWithPhone(phone: String, passwordHash: String): Result<UserEntity>
+    suspend fun loginWithUserId(userId: String): Result<UserEntity>
     suspend fun registerUser(
         fullName: String,
         email: String,
@@ -88,6 +89,8 @@ interface QuizRepository {
     suspend fun updateUserRole(userId: String, role: String): Result<Unit>
     suspend fun deleteUser(userId: String): Result<Unit>
     suspend fun addAuditLog(action: String, target: String)
+    suspend fun runFirebaseDiagnostics(): Result<String>
+    suspend fun forceUploadAllToFirebase(): Result<String>
 }
 
 class SupabaseOfflineFirstQuizRepository(
@@ -126,6 +129,16 @@ class SupabaseOfflineFirstQuizRepository(
             }
         } else {
             Result.failure(Exception("Invalid phone number or password."))
+        }
+    }
+
+    override suspend fun loginWithUserId(userId: String): Result<UserEntity> {
+        val user = quizAppDao.getUserById(userId)
+        return if (user != null) {
+            _currentUserState.value = user
+            Result.success(user)
+        } else {
+            Result.failure(Exception("User not found."))
         }
     }
 
@@ -249,6 +262,14 @@ class SupabaseOfflineFirstQuizRepository(
     override suspend fun deleteCategory(categoryId: String) {
         quizAppDao.deleteCategoryById(categoryId)
         addAuditLog("CATEGORY_DELETE", "Deleted Category ID: $categoryId")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.deleteCategory(categoryId)
+                FirebaseFirestoreSync.deleteLeaderboardByCategory(categoryId)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed deleting Category from Firebase: ${e.message}")
+            }
+        }
     }
 
     // Quizzes
@@ -278,6 +299,15 @@ class SupabaseOfflineFirstQuizRepository(
         quizAppDao.deleteQuizById(quizId)
         quizAppDao.deleteQuestionsByQuizId(quizId)
         addAuditLog("QUIZ_DELETE", "Deleted Quiz ID: $quizId")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.deleteQuiz(quizId)
+                FirebaseFirestoreSync.deleteQuestionsByQuiz(quizId)
+                FirebaseFirestoreSync.deleteLeaderboardByQuiz(quizId)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed deleting Quiz from Firebase: ${e.message}")
+            }
+        }
     }
 
     override suspend fun toggleQuizActive(quizId: String): Result<Unit> {
@@ -322,6 +352,13 @@ class SupabaseOfflineFirstQuizRepository(
 
     override suspend fun deleteQuestion(id: String) {
         quizAppDao.deleteQuestionById(id)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.deleteQuestion(id)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed deleting Question from Firebase: ${e.message}")
+            }
+        }
     }
 
     // Attempts and Leaderboard
@@ -393,9 +430,30 @@ class SupabaseOfflineFirstQuizRepository(
 
     override suspend fun clearLeaderboard(quizId: String?, categoryId: String?): Result<Unit> {
         when {
-            quizId != null -> quizAppDao.deleteLeaderboardByQuiz(quizId)
-            categoryId != null -> quizAppDao.deleteLeaderboardByCategory(categoryId)
-            else -> quizAppDao.clearAllLeaderboard()
+            quizId != null -> {
+                quizAppDao.deleteLeaderboardByQuiz(quizId)
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        FirebaseFirestoreSync.deleteLeaderboardByQuiz(quizId)
+                    } catch (e: Exception) {}
+                }
+            }
+            categoryId != null -> {
+                quizAppDao.deleteLeaderboardByCategory(categoryId)
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        FirebaseFirestoreSync.deleteLeaderboardByCategory(categoryId)
+                    } catch (e: Exception) {}
+                }
+            }
+            else -> {
+                quizAppDao.clearAllLeaderboard()
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        FirebaseFirestoreSync.clearAllLeaderboard()
+                    } catch (e: Exception) {}
+                }
+            }
         }
         addAuditLog("LEADERBOARD_CLEAR", "Cleared matches for Quiz: $quizId, Cat: $categoryId")
         return Result.success(Unit)
@@ -404,6 +462,13 @@ class SupabaseOfflineFirstQuizRepository(
     override suspend fun deleteLeaderboardEntry(id: String): Result<Unit> {
         quizAppDao.deleteLeaderboardById(id)
         addAuditLog("LEADERBOARD_ENTRY_DEL", "Deleted specific leaderboard record ID: $id")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.deleteLeaderboardEntry(id)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed deleting leaderboard entry from Firebase: ${e.message}")
+            }
+        }
         return Result.success(Unit)
     }
 
@@ -423,6 +488,13 @@ class SupabaseOfflineFirstQuizRepository(
     override suspend fun deleteSponsor(id: String) {
         quizAppDao.deleteSponsorById(id)
         addAuditLog("SPONSOR_DELETE", "Deleted Sponsor ID: $id")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.deleteSponsor(id)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed deleting Sponsor from Firebase: ${e.message}")
+            }
+        }
     }
 
     // Announcements
@@ -458,6 +530,13 @@ class SupabaseOfflineFirstQuizRepository(
     override suspend fun deleteAnnouncement(id: String) {
         quizAppDao.deleteAnnouncementById(id)
         addAuditLog("ANNOUNCEMENT_DELETE", "Deleted Announcement ID: $id")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.deleteAnnouncement(id)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed deleting Announcement from Firebase: ${e.message}")
+            }
+        }
     }
 
     override suspend fun toggleAnnouncementActive(id: String): Result<Unit> {
@@ -506,6 +585,13 @@ class SupabaseOfflineFirstQuizRepository(
     override suspend fun deleteUser(userId: String): Result<Unit> {
         quizAppDao.deleteUserById(userId)
         addAuditLog("SUPER_ADMIN_ACTION", "Permanently deleted user: $userId")
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseFirestoreSync.deleteUser(userId)
+            } catch (e: Exception) {
+                Log.e("QuizRepository", "Failed deleting User from Firebase: ${e.message}")
+            }
+        }
         return Result.success(Unit)
     }
 
@@ -524,6 +610,14 @@ class SupabaseOfflineFirstQuizRepository(
                 FirebaseFirestoreSync.pushAuditLog(log)
             } catch (e: Exception) {}
         }
+    }
+
+    override suspend fun runFirebaseDiagnostics(): Result<String> {
+        return FirebaseFirestoreSync.runDiagnostics()
+    }
+
+    override suspend fun forceUploadAllToFirebase(): Result<String> {
+        return FirebaseFirestoreSync.forceUploadAll(quizAppDao)
     }
 
     override suspend fun checkAndSeedDatabase() {

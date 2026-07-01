@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "288692071738",
+    "project_id": "ndc-quiz-android-app",
+    "storage_bucket": "ndc-quiz-android-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:288692071738:android:2100b7e67bce26f838b403",
+        "android_client_info": {
+          "package_name": "com.aistudio.quizapp.abcdef"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApV70t4IrfcvnxQiRkxDfwu9pkU3Evdx0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

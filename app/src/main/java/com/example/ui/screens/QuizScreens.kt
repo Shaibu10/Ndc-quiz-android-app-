@@ -329,6 +329,7 @@ fun LoginScreen(
     var password by remember { mutableStateOf("") }
     var isAdminLogin by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
+    var rememberMe by remember { mutableStateOf(false) }
 
     val isLoading by authViewModel.isLoading.collectAsStateWithLifecycle()
     val authError by authViewModel.authError.collectAsStateWithLifecycle()
@@ -431,6 +432,20 @@ fun LoginScreen(
                         Text(it, color = Color.Red, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
 
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = rememberMe,
+                            onCheckedChange = { rememberMe = it },
+                            colors = CheckboxDefaults.colors(checkedColor = NDCGreen, uncheckedColor = Color.White)
+                        )
+                        Text("Remember Me", color = Color.White, fontSize = 14.sp)
+                    }
+
                     Spacer(modifier = Modifier.height(24.dp))
 
                     if (isLoading) {
@@ -444,7 +459,7 @@ fun LoginScreen(
                                 if (emailOrPhone.isEmpty() || password.isEmpty()) {
                                     Toast.makeText(context, "Credentials cannot be empty", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    authViewModel.login(emailOrPhone, password) { user ->
+                                    authViewModel.login(emailOrPhone, password, rememberMe) { user ->
                                         if (isAdminLogin && user.role == "User") {
                                             Toast.makeText(context, "Unauthorized. Admin role required.", Toast.LENGTH_LONG).show()
                                         } else {
@@ -653,6 +668,7 @@ fun RegisterScreen(
 }
 
 // 5. HOME SCREEN
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     authViewModel: AuthViewModel,
@@ -668,6 +684,8 @@ fun HomeScreen(
     val searchQuery by quizViewModel.searchQuery.collectAsStateWithLifecycle()
 
     var activeTab by remember { mutableStateOf("Quizzes") }
+    var expanded by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf<CategoryEntity?>(null) }
 
     Scaffold(
         bottomBar = {
@@ -823,7 +841,7 @@ fun HomeScreen(
                 val activeAnnouncements = announcements.filter { it.active }
                 if (activeAnnouncements.isNotEmpty() && searchQuery.isEmpty()) {
                     item {
-                        Text("PARTY ANNOUNCEMENTS", fontSize = 12.sp, color = NDCGold, fontWeight = FontWeight.Bold)
+                        Text("Announcements", fontSize = 14.sp, color = NDCGold, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(8.dp))
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -893,56 +911,66 @@ fun HomeScreen(
                     }
                 }
 
-                // Categories Row
-                if (searchQuery.isEmpty()) {
-                    item {
-                        Text("DISCOVER CATEGORIES", fontSize = 12.sp, color = NDCGold, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                // Categories Filter
+                item {
+                    Text("FILTER BY CATEGORY", fontSize = 12.sp, color = NDCGold, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    ExposedDropdownMenuBox(
+                        expanded = expanded,
+                        onExpandedChange = { expanded = !expanded }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedCategory?.categoryName ?: "All Categories",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = NDCCharcoal,
+                                unfocusedContainerColor = NDCCharcoal,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(categories) { cat ->
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
-                                    modifier = Modifier.width(130.dp)
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.padding(8.dp)
-                                    ) {
-                                        AsyncImage(
-                                            model = cat.categoryImage,
-                                            contentDescription = null,
-                                            modifier = Modifier
-                                                .size(60.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            cat.categoryName,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            textAlign = TextAlign.Center,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
+                            DropdownMenuItem(
+                                text = { Text("All Categories") },
+                                onClick = {
+                                    selectedCategory = null
+                                    expanded = false
                                 }
+                            )
+                            categories.forEach { category ->
+                                DropdownMenuItem(
+                                    text = { Text(category.categoryName) },
+                                    onClick = {
+                                        selectedCategory = category
+                                        expanded = false
+                                    }
+                                )
                             }
                         }
-                        Spacer(modifier = Modifier.height(20.dp))
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // Quizzes List filtered by Search Query
+                // Quizzes List filtered by Search Query and Category
                 item {
                     Text("ACTIVE LEAGUE QUIZZES", fontSize = 12.sp, color = NDCGold, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
                 val filteredQuizzes = quizzes.filter {
-                    it.active && (it.title.contains(searchQuery, ignoreCase = true) || it.description.contains(searchQuery, ignoreCase = true))
+                    val matchesSearch = it.title.contains(searchQuery, ignoreCase = true) || it.description.contains(searchQuery, ignoreCase = true)
+                    val matchesCategory = selectedCategory == null || it.categoryId == selectedCategory?.id
+                    it.active && matchesSearch && matchesCategory
                 }
 
                 if (filteredQuizzes.isEmpty()) {
@@ -2671,6 +2699,7 @@ fun AdminDashboardScreen(
     var manualQnCorrectDropdownExpanded by remember { mutableStateOf(false) }
     var manualQnExplanation by remember { mutableStateOf("") }
     var manualQnImageUrl by remember { mutableStateOf("") }
+    var editingQuestionId by remember { mutableStateOf<String?>(null) }
 
     // Broadcast system overlay variables
     var broadcastTitle by remember { mutableStateOf("") }
@@ -2747,96 +2776,378 @@ fun AdminDashboardScreen(
                 when (activeAdminTab) {
                     "Analytics" -> {
                         item {
-                            Text("EXECUTIVE METRIC SCORECARDS", fontWeight = FontWeight.Bold, color = NDCOffWhite, fontSize = 14.sp)
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // Grid style responsive summaries
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(2),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(210.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            // Page Header
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                item {
-                                    Card(colors = CardDefaults.cardColors(containerColor = NDCCharcoal)) {
-                                        Column(modifier = Modifier.padding(14.dp)) {
-                                            Text("TOTAL USERS", color = NDCGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                            Text("${users.size}", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                                Column {
+                                    Text(
+                                        "EXECUTIVE PERFORMANCE & INSIGHTS",
+                                        fontWeight = FontWeight.Bold,
+                                        color = NDCOffWhite,
+                                        fontSize = 15.sp,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                    Text(
+                                        "Real-time participation statistics and system engagement metrics.",
+                                        color = Color.LightGray,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+
+                            // Dynamic Statistics Summary
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    // Card 1: Total Users
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                        border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("TOTAL USERS", color = NDCGold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text("${users.size}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                                Text("Registered participants", color = Color.LightGray, fontSize = 9.sp)
+                                            }
+                                            Icon(Icons.Default.Person, contentDescription = null, tint = NDCGold, modifier = Modifier.size(24.dp))
+                                        }
+                                    }
+
+                                    // Card 2: Quiz Modules
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                        border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("ACTIVE QUIZZES", color = NDCGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text("${quizzes.size}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                                Text("Educational modules", color = Color.LightGray, fontSize = 9.sp)
+                                            }
+                                            Icon(Icons.Default.School, contentDescription = null, tint = NDCGreen, modifier = Modifier.size(24.dp))
                                         }
                                     }
                                 }
-                                item {
-                                    Card(colors = CardDefaults.cardColors(containerColor = NDCCharcoal)) {
-                                        Column(modifier = Modifier.padding(14.dp)) {
-                                            Text("QUIZ MODULES", color = NDCGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                            Text("${quizzes.size}", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    // Card 3: Total Submissions (Attempts)
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                        border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("QUIZ ATTEMPTS", color = Color(0xFF38BDF8), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text("${adminLeaderboardEntries.size}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                                Text("Completed submissions", color = Color.LightGray, fontSize = 9.sp)
+                                            }
+                                            Icon(Icons.Default.Leaderboard, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(24.dp))
                                         }
                                     }
-                                }
-                                item {
-                                    Card(colors = CardDefaults.cardColors(containerColor = NDCCharcoal)) {
-                                        Column(modifier = Modifier.padding(14.dp)) {
-                                            Text("PARTNERS", color = NDCGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                            Text("${sponsors.size}", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-                                item {
-                                    Card(colors = CardDefaults.cardColors(containerColor = NDCCharcoal)) {
-                                        Column(modifier = Modifier.padding(14.dp)) {
-                                            Text("CATEGORIES", color = NDCGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                            Text("${categories.size}", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+
+                                    // Card 4: Sponsors
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                        border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("PARTNERS", color = NDCRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text("${sponsors.size}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                                Text("Supporting brands", color = Color.LightGray, fontSize = 9.sp)
+                                            }
+                                            Icon(Icons.Default.Business, contentDescription = null, tint = NDCRed, modifier = Modifier.size(24.dp))
                                         }
                                     }
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(24.dp))
-                            Text("REGIONAL PARTICIPATION DENSITY GRAPH", fontWeight = FontWeight.Bold, color = NDCOffWhite, fontSize = 13.sp)
-                            Spacer(modifier = Modifier.height(12.dp))
 
-                            // Custom canvas charts details
-                            Card(colors = CardDefaults.cardColors(containerColor = NDCCharcoal)) {
+                            // Performance metrics section
+                            val totalAttempts = adminLeaderboardEntries.size
+                            val avgScore = if (totalAttempts > 0) adminLeaderboardEntries.map { it.score }.average() else 0.0
+                            val formattedAvgScore = String.format("%.1f", avgScore)
+                            val maxScore = if (totalAttempts > 0) adminLeaderboardEntries.maxOfOrNull { it.score } ?: 0 else 0
+                            val avgTime = if (totalAttempts > 0) adminLeaderboardEntries.map { it.completionTimeSeconds }.average() else 0.0
+                            val formattedAvgTime = String.format("%.1fs", avgTime)
+
+                            Text(
+                                "PERFORMANCE QUALITY DEEP-DIVE",
+                                fontWeight = FontWeight.Bold,
+                                color = NDCOffWhite,
+                                fontSize = 13.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Column(modifier = Modifier.padding(16.dp)) {
-                                    Canvas(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(130.dp)
-                                    ) {
-                                        // Draw base line
-                                        drawLine(Color.Gray, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = 3f)
-
-                                        // Draw some bar entries indicating region user counts
-                                        val bars = listOf(140f, 210f, 80f, 170f, 110f)
-                                        val barNames = listOf("GAR", "ASH", "WR", "ER", "NR")
-                                        val barColor = NDCGreen
-                                        val redAccent = NDCRed
-
-                                        val stepX = size.width / 5
-                                        bars.forEachIndexed { i, value ->
-                                            val rectHeight = value
-                                            val x = stepX * i + stepX * 0.2f
-                                            val rectColor = if (i % 2 == 0) barColor else redAccent
-
-                                            drawRect(
-                                                color = rectColor,
-                                                topLeft = Offset(x, size.height - rectHeight),
-                                                size = androidx.compose.ui.geometry.Size(stepX * 0.6f, rectHeight)
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(12.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceAround
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Text("G. Accra", color = Color.White, fontSize = 10.sp)
-                                        Text("Ashanti", color = Color.White, fontSize = 10.sp)
-                                        Text("Western", color = Color.White, fontSize = 10.sp)
-                                        Text("Eastern", color = Color.White, fontSize = 10.sp)
-                                        Text("Northern", color = Color.White, fontSize = 10.sp)
+                                        // Average Score Column
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                            Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = NDCGold, modifier = Modifier.size(22.dp))
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text("Avg Score", color = Color.LightGray, fontSize = 11.sp)
+                                            Text("$formattedAvgScore%", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        // Divider
+                                        Box(modifier = Modifier.width(1.dp).height(50.dp).background(Color.Gray.copy(alpha = 0.2f)))
+
+                                        // Highest Score Column
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                            Icon(Icons.Default.School, contentDescription = null, tint = NDCGreen, modifier = Modifier.size(22.dp))
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text("Highest Score", color = Color.LightGray, fontSize = 11.sp)
+                                            Text("$maxScore%", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        // Divider
+                                        Box(modifier = Modifier.width(1.dp).height(50.dp).background(Color.Gray.copy(alpha = 0.2f)))
+
+                                        // Average Speed Column
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                            Icon(Icons.Default.Timer, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(22.dp))
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text("Avg Time", color = Color.LightGray, fontSize = 11.sp)
+                                            Text(formattedAvgTime, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Divider(color = Color.Gray.copy(alpha = 0.15f))
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // Top performing user info
+                                    val topAttempt = adminLeaderboardEntries.maxByOrNull { it.score }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Current Lead Contestant:", color = Color.LightGray, fontSize = 11.sp)
+                                        Text(
+                                            text = topAttempt?.let { "${it.userFullName.uppercase()} (${it.score}%)" } ?: "N/A",
+                                            color = NDCGold,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            // Region counts dynamic graphing
+                            val regionCounts = users.groupBy {
+                                val r = it.region.trim().uppercase()
+                                when {
+                                    r.contains("ACCRA") || r == "GAR" || r.contains("GREATER") -> "G. ACCRA"
+                                    r.contains("ASHANTI") || r == "ASH" -> "ASHANTI"
+                                    r.contains("WEST") && !r.contains("NORTH") -> "WESTERN"
+                                    r.contains("EAST") -> "EASTERN"
+                                    r.contains("NORTH") -> "NORTHERN"
+                                    r.contains("VOLTA") || r == "VR" -> "VOLTA"
+                                    r.contains("CENTRAL") || r == "CR" -> "CENTRAL"
+                                    else -> "OTHER"
+                                }
+                            }.mapValues { it.value.size }
+
+                            val chartRegions = listOf("G. ACCRA", "ASHANTI", "WESTERN", "EASTERN", "NORTHERN")
+                            val chartCounts = chartRegions.map { reg ->
+                                regionCounts[reg] ?: 0
+                            }
+
+                            // Dynamic Region Bar Chart
+                            val maxCount = chartCounts.maxOrNull() ?: 1
+                            val maxCountSafe = if (maxCount == 0) 1 else maxCount
+
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        "REGIONAL PARTICIPATION DENSITY GRAPH",
+                                        fontWeight = FontWeight.Bold,
+                                        color = NDCOffWhite,
+                                        fontSize = 12.sp,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "Live registered user distribution across major contest regions.",
+                                        color = Color.LightGray,
+                                        fontSize = 10.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(20.dp))
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(150.dp),
+                                        horizontalArrangement = Arrangement.SpaceEvenly,
+                                        verticalAlignment = Alignment.Bottom
+                                    ) {
+                                        chartRegions.forEachIndexed { index, name ->
+                                            val count = chartCounts.getOrElse(index) { 0 }
+                                            val barHeightFraction = count.toFloat() / maxCountSafe.toFloat()
+                                            
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                // Count tag
+                                                Text(
+                                                    text = count.toString(),
+                                                    color = Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                
+                                                // Dynamic scaled height Bar
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxHeight(0.75f * barHeightFraction + 0.05f) // scale 75% max height, 5% minimum
+                                                        .width(32.dp)
+                                                        .background(
+                                                            brush = Brush.verticalGradient(
+                                                                colors = if (index % 2 == 0) {
+                                                                    listOf(NDCGreen.copy(alpha = 0.7f), NDCGreen)
+                                                                } else {
+                                                                    listOf(NDCRed.copy(alpha = 0.7f), NDCRed)
+                                                                }
+                                                            ),
+                                                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
+                                                        )
+                                                        .border(
+                                                            width = 1.dp,
+                                                            color = if (index % 2 == 0) NDCGreen.copy(alpha = 0.5f) else NDCRed.copy(alpha = 0.5f),
+                                                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
+                                                        )
+                                                )
+                                                Spacer(modifier = Modifier.height(6.dp))
+                                                
+                                                // Region code
+                                                Text(
+                                                    text = when (name) {
+                                                        "G. ACCRA" -> "Accra"
+                                                        "ASHANTI" -> "Ashanti"
+                                                        "WESTERN" -> "Western"
+                                                        "EASTERN" -> "Eastern"
+                                                        "NORTHERN" -> "Northern"
+                                                        else -> name
+                                                    },
+                                                    color = Color.LightGray,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            // Popular modules / Activity breakdown
+                            Text(
+                                "POPULAR CHALLENGES & ENGAGEMENT",
+                                fontWeight = FontWeight.Bold,
+                                color = NDCOffWhite,
+                                fontSize = 13.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    val topQuizzes = quizzes.map { q ->
+                                        val attempts = adminLeaderboardEntries.filter { it.quizId == q.id }
+                                        val quizAvg = if (attempts.isNotEmpty()) attempts.map { it.score }.average() else 0.0
+                                        q to Pair(attempts.size, quizAvg)
+                                    }.sortedByDescending { it.second.first }.take(4)
+
+                                    if (topQuizzes.isEmpty()) {
+                                        Text("No quiz submissions registered yet.", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    } else {
+                                        topQuizzes.forEachIndexed { idx, pair ->
+                                            val q = pair.first
+                                            val stats = pair.second
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(24.dp)
+                                                            .background(if (idx == 0) NDCGold else if (idx == 1) Color.LightGray else NDCCharcoal, CircleShape)
+                                                            .border(1.dp, Color.Gray.copy(alpha = 0.3f), CircleShape),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text("${idx + 1}", color = if (idx < 2) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                    Spacer(modifier = Modifier.width(10.dp))
+                                                    Column {
+                                                        Text(q.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                                        Text("Average accuracy: ${String.format("%.1f", stats.second)}%", color = Color.LightGray, fontSize = 10.sp)
+                                                    }
+                                                }
+                                                Column(horizontalAlignment = Alignment.End) {
+                                                    Text("${stats.first} plays", color = NDCGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                    Text("Completed", color = Color.Gray, fontSize = 9.sp)
+                                                }
+                                            }
+                                            if (idx < topQuizzes.size - 1) {
+                                                Divider(color = Color.Gray.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 4.dp))
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3300,7 +3611,18 @@ fun AdminDashboardScreen(
                                                     Text("ACTIVE MODULE TARGET:", color = NDCGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                     Text(targetQuizSelected.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                                 }
-                                                IconButton(onClick = { selectedQuizIdForQuestions = null }) {
+                                                IconButton(onClick = {
+                                                    selectedQuizIdForQuestions = null
+                                                    editingQuestionId = null
+                                                    manualQnText = ""
+                                                    manualQnOptA = ""
+                                                    manualQnOptB = ""
+                                                    manualQnOptC = ""
+                                                    manualQnOptD = ""
+                                                    manualQnCorrectAnswer = "A"
+                                                    manualQnExplanation = ""
+                                                    manualQnImageUrl = ""
+                                                }) {
                                                     Icon(Icons.Default.Close, contentDescription = "Deselect", tint = NDCRed)
                                                 }
                                             }
@@ -3310,7 +3632,12 @@ fun AdminDashboardScreen(
                                             Spacer(modifier = Modifier.height(12.dp))
 
                                             // Sub-Section A: Manual Question Builder
-                                            Text("METHOD A: MANUAL QUESTION CREATION", color = NDCGold, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            Text(
+                                                text = if (editingQuestionId == null) "METHOD A: MANUAL QUESTION CREATION" else "METHOD A: EDITING ACTIVE QUESTION",
+                                                color = NDCGold,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp
+                                            )
                                             Spacer(modifier = Modifier.height(8.dp))
 
                                             TextField(
@@ -3442,37 +3769,96 @@ fun AdminDashboardScreen(
 
                                             Spacer(modifier = Modifier.height(10.dp))
 
-                                            Button(
-                                                onClick = {
-                                                    if (manualQnText.isEmpty() || manualQnOptA.isEmpty() || manualQnOptB.isEmpty()) {
-                                                        Toast.makeText(context, "Filled questions and at least options A & B", Toast.LENGTH_SHORT).show()
-                                                    } else {
-                                                        quizViewModel.addManualQuestion(
-                                                            quizId = selectedQuizIdForQuestions!!,
-                                                            questionText = manualQnText,
-                                                            optionA = manualQnOptA,
-                                                            optionB = manualQnOptB,
-                                                            optionC = manualQnOptC,
-                                                            optionD = manualQnOptD,
-                                                            correctAnswer = manualQnCorrectAnswer,
-                                                            explanation = manualQnExplanation,
-                                                            imageUrl = manualQnImageUrl
-                                                        )
-                                                        manualQnText = ""
-                                                        manualQnOptA = ""
-                                                        manualQnOptB = ""
-                                                        manualQnOptC = ""
-                                                        manualQnOptD = ""
-                                                        manualQnCorrectAnswer = "A"
-                                                        manualQnExplanation = ""
-                                                        manualQnImageUrl = ""
-                                                        Toast.makeText(context, "Question added securely", Toast.LENGTH_SHORT).show()
+                                            if (editingQuestionId == null) {
+                                                Button(
+                                                    onClick = {
+                                                        if (manualQnText.isEmpty() || manualQnOptA.isEmpty() || manualQnOptB.isEmpty()) {
+                                                            Toast.makeText(context, "Filled questions and at least options A & B", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            quizViewModel.addManualQuestion(
+                                                                quizId = selectedQuizIdForQuestions!!,
+                                                                questionText = manualQnText,
+                                                                optionA = manualQnOptA,
+                                                                optionB = manualQnOptB,
+                                                                optionC = manualQnOptC,
+                                                                optionD = manualQnOptD,
+                                                                correctAnswer = manualQnCorrectAnswer,
+                                                                explanation = manualQnExplanation,
+                                                                imageUrl = manualQnImageUrl
+                                                            )
+                                                            manualQnText = ""
+                                                            manualQnOptA = ""
+                                                            manualQnOptB = ""
+                                                            manualQnOptC = ""
+                                                            manualQnOptD = ""
+                                                            manualQnCorrectAnswer = "A"
+                                                            manualQnExplanation = ""
+                                                            manualQnImageUrl = ""
+                                                            Toast.makeText(context, "Question added securely", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = NDCGreen),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Text("RECORD MANUAL QUESTION", fontWeight = FontWeight.Bold)
+                                                }
+                                            } else {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Button(
+                                                        onClick = {
+                                                            editingQuestionId = null
+                                                            manualQnText = ""
+                                                            manualQnOptA = ""
+                                                            manualQnOptB = ""
+                                                            manualQnOptC = ""
+                                                            manualQnOptD = ""
+                                                            manualQnCorrectAnswer = "A"
+                                                            manualQnExplanation = ""
+                                                            manualQnImageUrl = ""
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Gray),
+                                                        modifier = Modifier.weight(0.4f)
+                                                    ) {
+                                                        Text("CANCEL")
                                                     }
-                                                },
-                                                colors = ButtonDefaults.buttonColors(containerColor = NDCGreen),
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Text("RECORD MANUAL QUESTION", fontWeight = FontWeight.Bold)
+                                                    Button(
+                                                        onClick = {
+                                                            if (manualQnText.isEmpty() || manualQnOptA.isEmpty() || manualQnOptB.isEmpty()) {
+                                                                Toast.makeText(context, "Filled questions and at least options A & B", Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                quizViewModel.updateManualQuestion(
+                                                                    id = editingQuestionId!!,
+                                                                    quizId = selectedQuizIdForQuestions!!,
+                                                                    questionText = manualQnText,
+                                                                    optionA = manualQnOptA,
+                                                                    optionB = manualQnOptB,
+                                                                    optionC = manualQnOptC,
+                                                                    optionD = manualQnOptD,
+                                                                    correctAnswer = manualQnCorrectAnswer,
+                                                                    explanation = manualQnExplanation,
+                                                                    imageUrl = manualQnImageUrl
+                                                                )
+                                                                editingQuestionId = null
+                                                                manualQnText = ""
+                                                                manualQnOptA = ""
+                                                                manualQnOptB = ""
+                                                                manualQnOptC = ""
+                                                                manualQnOptD = ""
+                                                                manualQnCorrectAnswer = "A"
+                                                                manualQnExplanation = ""
+                                                                manualQnImageUrl = ""
+                                                                Toast.makeText(context, "Question updated securely", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = NDCGold),
+                                                        modifier = Modifier.weight(0.6f)
+                                                    ) {
+                                                        Text("SAVE CHANGES", fontWeight = FontWeight.Bold, color = Color.Black)
+                                                    }
+                                                }
                                             }
 
                                             Spacer(modifier = Modifier.height(16.dp))
@@ -3570,8 +3956,24 @@ fun AdminDashboardScreen(
                                                                 }
                                                                 Text("Correct: Option ${q.correctAnswer} • A: ${q.optionA} • B: ${q.optionB}", color = Color.LightGray, fontSize = 10.sp)
                                                             }
-                                                            IconButton(onClick = { quizViewModel.deleteManualQuestion(q.id, selectedQuizIdForQuestions!!) }) {
-                                                                Icon(Icons.Default.Delete, contentDescription = "Delete Question", tint = NDCRed, modifier = Modifier.size(16.dp))
+                                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                                IconButton(onClick = {
+                                                                    editingQuestionId = q.id
+                                                                    manualQnText = q.questionText
+                                                                    manualQnOptA = q.optionA
+                                                                    manualQnOptB = q.optionB
+                                                                    manualQnOptC = q.optionC
+                                                                    manualQnOptD = q.optionD
+                                                                    manualQnCorrectAnswer = q.correctAnswer
+                                                                    manualQnExplanation = q.explanation
+                                                                    manualQnImageUrl = q.imageUrl
+                                                                    Toast.makeText(context, "Populated question details above for editing.", Toast.LENGTH_SHORT).show()
+                                                                }) {
+                                                                    Icon(Icons.Default.Edit, contentDescription = "Edit Question", tint = NDCGold, modifier = Modifier.size(16.dp))
+                                                                }
+                                                                IconButton(onClick = { quizViewModel.deleteManualQuestion(q.id, selectedQuizIdForQuestions!!) }) {
+                                                                    Icon(Icons.Default.Delete, contentDescription = "Delete Question", tint = NDCRed, modifier = Modifier.size(16.dp))
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -5091,7 +5493,8 @@ fun AdminDashboardScreen(
                                 configProvider, { configProvider = it },
                                 configDbUrl, { configDbUrl = it },
                                 configProjectId, { configProjectId = it },
-                                isConnected, { isConnected = !isConnected } // Simple toggle for demonstration
+                                isConnected, { isConnected = !isConnected }, // Simple toggle for demonstration
+                                quizViewModel = quizViewModel
                             )
                         }
                     }
@@ -5110,8 +5513,13 @@ fun DatabaseSettingsScreen(
     projectId: String,
     onProjectIdChange: (String) -> Unit,
     isConnected: Boolean,
-    onTestConnection: () -> Unit
+    onTestConnection: () -> Unit,
+    quizViewModel: QuizViewModel
 ) {
+    val diagState by quizViewModel.firebaseDiagState.collectAsStateWithLifecycle()
+    val syncState by quizViewModel.firebaseSyncState.collectAsStateWithLifecycle()
+    val isLoading by quizViewModel.isFirebaseOpLoading.collectAsStateWithLifecycle()
+
     Column(modifier = Modifier.padding(16.dp)) {
         Text("Database Connection Management", style = MaterialTheme.typography.headlineMedium, color = Color.White)
         Spacer(modifier = Modifier.height(16.dp))
@@ -5198,6 +5606,116 @@ fun DatabaseSettingsScreen(
                 else -> "Consult your database provider's documentation to find the required API URL/Endpoint and Project ID. Keep sensitive keys in the AI Studio Secrets panel."
             }
             Text(guide, color = Color.LightGray, fontSize = 14.sp)
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Card(
+            colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.NotificationImportant,
+                        contentDescription = null,
+                        tint = NDCGold,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Firebase Connection & Sync Diagnostics",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = NDCGreen,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "If you are running on a real phone and cannot see data in the Firebase Console, run these diagnostics to verify connection or force sync local data to remote.",
+                    color = Color.LightGray,
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { quizViewModel.runFirebaseDiagnostics() },
+                        colors = ButtonDefaults.buttonColors(containerColor = NDCGreen),
+                        modifier = Modifier.weight(1f),
+                        enabled = !isLoading
+                    ) {
+                        Text("RUN DIAGNOSTICS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = { quizViewModel.forceUploadAllToFirebase() },
+                        colors = ButtonDefaults.buttonColors(containerColor = NDCGold),
+                        modifier = Modifier.weight(1f),
+                        enabled = !isLoading
+                    ) {
+                        Text("FORCE SYNC REMOTE", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (isLoading) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        CircularProgressIndicator(color = NDCGreen, modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Processing remote operation...", color = Color.White, fontSize = 13.sp)
+                    }
+                }
+
+                diagState?.let { status ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Diagnostic Result:", style = MaterialTheme.typography.bodyMedium, color = NDCGold, fontWeight = FontWeight.Bold)
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = NDCDarkBg),
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Text(
+                            text = status,
+                            color = if (status.contains("Success", ignoreCase = true)) NDCGreen else NDCRed,
+                            fontSize = 12.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
+
+                syncState?.let { status ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Sync Result:", style = MaterialTheme.typography.bodyMedium, color = NDCGold, fontWeight = FontWeight.Bold)
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = NDCDarkBg),
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Text(
+                            text = status,
+                            color = if (status.contains("Sync failed", ignoreCase = true) || status.contains("Error", ignoreCase = true)) NDCRed else NDCGreen,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
+
+                if (diagState != null || syncState != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = { quizViewModel.clearFirebaseStatusMessages() },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("CLEAR MESSAGES", color = Color.LightGray, fontSize = 11.sp)
+                    }
+                }
+            }
         }
     }
 }
