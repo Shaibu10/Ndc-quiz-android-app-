@@ -135,6 +135,9 @@ interface QuizAppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAuditLog(log: AuditLogEntity)
 
+    @Query("DELETE FROM audit_logs")
+    suspend fun clearAllAuditLogs()
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLeaderboardEntries(entries: List<LeaderboardEntity>)
 }

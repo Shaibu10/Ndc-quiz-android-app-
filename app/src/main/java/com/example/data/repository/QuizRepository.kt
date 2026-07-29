@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import java.util.UUID
 
@@ -79,8 +80,8 @@ interface QuizRepository {
     suspend fun deleteAnnouncement(id: String)
     suspend fun toggleAnnouncementActive(id: String): Result<Unit>
 
-    // Seed Data
-    suspend fun checkAndSeedDatabase()
+    // Sync
+    suspend fun syncWithRemoteDatabase()
 
     // Analytics / Admin
     val allUsersFlow: Flow<List<UserEntity>>
@@ -89,6 +90,7 @@ interface QuizRepository {
     suspend fun updateUserRole(userId: String, role: String): Result<Unit>
     suspend fun deleteUser(userId: String): Result<Unit>
     suspend fun addAuditLog(action: String, target: String)
+    suspend fun clearAllAuditLogs(): Result<Unit>
     suspend fun runFirebaseDiagnostics(): Result<String>
     suspend fun forceUploadAllToFirebase(): Result<String>
 }
@@ -362,9 +364,14 @@ class SupabaseOfflineFirstQuizRepository(
     }
 
     // Attempts and Leaderboard
-    override val attemptsFlow: Flow<List<QuizAttemptEntity>>
-        get() = _currentUserState.value?.let { quizAppDao.getAttemptsByUserFlow(it.id) }
-            ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override val attemptsFlow: Flow<List<QuizAttemptEntity>> = _currentUserState.flatMapLatest { user ->
+        if (user == null) {
+            kotlinx.coroutines.flow.flowOf(emptyList())
+        } else {
+            quizAppDao.getAttemptsByUserFlow(user.id)
+        }
+    }
 
     override fun getLeaderboard(quizId: String?, categoryId: String?, period: String): Flow<List<LeaderboardEntity>> {
         return when {
@@ -612,6 +619,16 @@ class SupabaseOfflineFirstQuizRepository(
         }
     }
 
+    override suspend fun clearAllAuditLogs(): Result<Unit> {
+        return try {
+            quizAppDao.clearAllAuditLogs()
+            addAuditLog("AUDIT_CLEAR", "All historic audit logs cleared from system.")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun runFirebaseDiagnostics(): Result<String> {
         return FirebaseFirestoreSync.runDiagnostics()
     }
@@ -620,238 +637,12 @@ class SupabaseOfflineFirstQuizRepository(
         return FirebaseFirestoreSync.forceUploadAll(quizAppDao)
     }
 
-    override suspend fun checkAndSeedDatabase() {
+    override suspend fun syncWithRemoteDatabase() {
         // Try to sync with Firestore remote database first
         try {
             FirebaseFirestoreSync.performanceCompleteSync(quizAppDao)
         } catch (e: Exception) {
-            Log.e("QuizRepository", "First-time remote database sync failed/offline: ${e.message}")
-        }
-
-        val existingCats = quizAppDao.getAllCategoriesFlow().first()
-        if (existingCats.isNotEmpty()) {
-            Log.i("QuizRepository", "Database populated successfully (size: ${existingCats.size} categories)")
-            return // Seeded already (either via Firestore pull or local db cache)
-        }
-
-        Log.w("QuizRepository", "Empty database detected. Performing initial local high-fidelity seeding and Firestore uploads...")
-
-        // 1. Categories
-        val cats = listOf(
-            CategoryEntity("cat1", "NDC History", "https://images.unsplash.com/photo-1540910419892-4a36d2c3266c?q=80&w=260", "The rich revolutionary foundation, philosophies and timeline of the NDC party."),
-            CategoryEntity("cat2", "NDC Leadership", "https://images.unsplash.com/photo-1517048676732-d65bc937f952?q=80&w=260", "Flagbearers, Presidents, National Chairpersons, and founders of the congress."),
-            CategoryEntity("cat3", "Ghana Politics", "https://images.unsplash.com/photo-1450133064473-71024230f91b?q=80&w=260", "General political milestones, administrative divisions, and democratic transitions."),
-            CategoryEntity("cat4", "Election Campaign & Manifestos", "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?q=80&w=260", "Highlighting policies, presidential promises, and key party platforms."),
-            CategoryEntity("cat5", "Party Constitution & Structure", "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?q=80&w=260", "The written guidelines, hierarchy, principles, and internal organs of the NDC.")
-        )
-        cats.forEach { quizAppDao.insertCategory(it) }
-
-        // 2. Administrators / Users
-        val adminUser = UserEntity(
-            id = "admin_shaibu",
-            fullName = "Shaibu Mahama",
-            phoneNumber = "+233244123456",
-            email = "shaibu5278@gmail.com",
-            region = "Greater Accra",
-            constituency = "Ayawaso West Wuogon",
-            role = "Super Admin",
-            status = "Active",
-            profilePhoto = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200",
-            passwordHash = "47fdac4f" // first 8 characters of app ID serves as dummy hashed password
-        )
-        quizAppDao.insertUser(adminUser)
-
-        val partyUser = UserEntity(
-            id = "test_user_id",
-            fullName = "Kwame Mensah",
-            phoneNumber = "+233201112222",
-            email = "kwame@ndc.com",
-            region = "Ashanti",
-            constituency = "Asawase",
-            role = "User",
-            status = "Active",
-            profilePhoto = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200",
-            passwordHash = "123456"
-        )
-        quizAppDao.insertUser(partyUser)
-
-        // 3. Quizzes
-        val q1 = QuizEntity(
-            id = "quiz1",
-            categoryId = "cat1",
-            title = "NDC Historical Milestone Quiz",
-            description = "Test your depth on the foundation, PNDC evolution, and Jerry John Rawlings legacy.",
-            imageUrl = "https://images.unsplash.com/photo-1450133064473-71024230f91b?q=80&w=400",
-            sponsorName = "NDC Greater Accra Caucus",
-            sponsorLogo = "https://images.unsplash.com/photo-1560179707-f14e90ef3623?q=80&w=100",
-            accessCode = "",
-            timeLimitMinutes = 3,
-            startDate = "2026-06-01",
-            endDate = "2026-12-31",
-            totalQuestions = 4,
-            createdBy = "admin_shaibu",
-            sponsorId = "sp1",
-            maxAttempts = 3
-        )
-        val q2 = QuizEntity(
-            id = "quiz2",
-            categoryId = "cat2",
-            title = "Atta Mills & Mahama Leadership Quiz",
-            description = "Understand the philosophies, policy programs, and social infrastructure legacy of John Evans Atta Mills and John Dramani Mahama.",
-            imageUrl = "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=400",
-            sponsorName = "John Mahama Action Group",
-            sponsorLogo = "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=100",
-            accessCode = "NDC2026", // Requires code!
-            timeLimitMinutes = 5,
-            startDate = "2026-06-01",
-            endDate = "2026-12-31",
-            totalQuestions = 3,
-            createdBy = "admin_shaibu",
-            sponsorId = "sp2",
-            maxAttempts = 1
-        )
-        quizAppDao.insertQuiz(q1)
-        quizAppDao.insertQuiz(q2)
-
-        // 4. Questions
-        val questions = listOf(
-            // Quiz 1 Questions (NDC History)
-            QuestionEntity(
-                id = "qn1_1",
-                quizId = "quiz1",
-                questionText = "In what year was the National Democratic Congress (NDC) officially founded?",
-                optionA = "1981",
-                optionB = "1992",
-                optionC = "1996",
-                optionD = "2000",
-                correctAnswer = "B",
-                explanation = "The NDC was founded in 1992 by Jerry John Rawlings, transitioning Ghana into democratic governance under the Fourth Republic.",
-                imageUrl = ""
-            ),
-            QuestionEntity(
-                id = "qn1_2",
-                quizId = "quiz1",
-                questionText = "Which visual icon represents unity, shelter, and security on the official NDC party logo?",
-                optionA = "The Red Rooster",
-                optionB = "The Umbrella with an Eagle",
-                optionC = "The Golden Elephant",
-                optionD = "The Rising Sun",
-                correctAnswer = "B",
-                explanation = "The Umbrella (Akatamanso) with an Eagle perched on top symbolises nationwide unity, protection, shelter for all, and soaring leadership.",
-                imageUrl = ""
-            ),
-            QuestionEntity(
-                id = "qn1_3",
-                quizId = "quiz1",
-                questionText = "What colors compile the official colors of the NDC party?",
-                optionA = "Green, White, Red, and Black",
-                optionB = "Blue, White, and Red",
-                optionC = "Red, Gold, Green, and Black",
-                optionD = "Green, Yellow, and Purple",
-                correctAnswer = "A",
-                explanation = "NDC's official brand colors are Green (rich land), White (peace/purity), Red (martyr sacrifice), and Black (African dignity).",
-                imageUrl = ""
-            ),
-            QuestionEntity(
-                id = "qn1_4",
-                quizId = "quiz1",
-                questionText = "Who was chosen as the NDC Vice-Presidential candidate alongside Jerry John Rawlings in the historic 1992 election?",
-                optionA = "Kow Nkensen Arkaah",
-                optionB = "John Evans Atta Mills",
-                optionC = "Martin Amidu",
-                optionD = "Amissah-Arthur",
-                correctAnswer = "A",
-                explanation = "Kow Nkensen Arkaah of the National Convention Party (NCP) was Rawlings' running mate in 1992 as part of the Progressive Alliance.",
-                imageUrl = ""
-            ),
-
-            // Quiz 2 Questions (Leadership)
-            QuestionEntity(
-                id = "qn2_1",
-                quizId = "quiz2",
-                questionText = "Which former NDC President of Ghana was affectionately nicknamed the 'Asomdwee Hene' (King of Peace)?",
-                optionA = "Jerry John Rawlings",
-                optionB = "John Evans Atta Mills",
-                optionC = "John Dramani Mahama",
-                optionD = "Kwame Nkrumah",
-                correctAnswer = "B",
-                explanation = "Professor John Evans Atta Mills was loved for his serene demeanor, peaceful administrative values and humility, earning him the title Asomdwee Hene.",
-                imageUrl = ""
-            ),
-            QuestionEntity(
-                id = "qn2_2",
-                quizId = "quiz2",
-                questionText = "H.E. John Dramani Mahama served of which national position prior to becoming the President of Ghana?",
-                optionA = "Speaker of Parliament",
-                optionB = "Chief Justice",
-                optionC = "Vice President & MP for Bole Bamboi",
-                optionD = "Mayor of Accra",
-                correctAnswer = "C",
-                explanation = "John Dramani Mahama served as Member of Parliament for Bole Bamboi, Minister of Communication, and Vice President before becoming President.",
-                imageUrl = ""
-            ),
-            QuestionEntity(
-                id = "qn2_3",
-                quizId = "quiz2",
-                questionText = "Which major economic masterstroke was initiated under John Mahama's leadership to address electricity stability?",
-                optionA = "The Bui Dam construction completion",
-                optionB = "The introduction of the Karpowership and Ameri Power plants",
-                optionC = "Akosombo expansion only",
-                optionD = "Solar grid privatization",
-                correctAnswer = "B",
-                explanation = "President John Mahama resolved the power crisis ('Dumsor') systematically by adding emergency and thermal generation capacities via Karpowership and Ameri.",
-                imageUrl = ""
-            )
-        )
-        quizAppDao.insertQuestions(questions)
-
-        // 5. Sponsors
-        val s1 = SponsorEntity("sp1", "NDC Greater Accra Caucus", "https://images.unsplash.com/photo-1560179707-f14e90ef3623?q=80&w=100", "Supporting youth development.")
-        val s2 = SponsorEntity("sp2", "John Mahama Action Group", "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?q=80&w=100", "Building the Ghana we want together.")
-        quizAppDao.insertSponsor(s1)
-        quizAppDao.insertSponsor(s2)
-
-        // 6. Announcements
-        val an1 = AnnouncementEntity(
-            id = "an_1",
-            title = "🏆 National NDC Quiz Battle 2026 Launches!",
-            content = "Participate and win laptops, tablets, and cash awards sponsored by party patriots. Quizzes refresh daily!"
-        )
-        val an2 = AnnouncementEntity(
-            id = "an_2",
-            title = "💼 Youth Employment and Tech Workshops",
-            content = "Join our virtual tech and training skills session this Saturday at 4 PM GMT. Check dashboard for webinar links."
-        )
-        quizAppDao.insertAnnouncement(an1)
-        quizAppDao.insertAnnouncement(an2)
-
-        // 7. Simulated Leaderboard
-        val testLeaders = listOf(
-            LeaderboardEntity(UUID.randomUUID().toString(), "test_user_id", "Kwame Mensah", "quiz1", "cat1", 4, 45, 1, "Global", "Ashanti", "Asawase"),
-            LeaderboardEntity(UUID.randomUUID().toString(), "dummy_1", "Efua Ansah", "quiz1", "cat1", 3, 55, 2, "Global", "Central", "Cape Coast South"),
-            LeaderboardEntity(UUID.randomUUID().toString(), "dummy_2", "Alhassan Ibrahim", "quiz1", "cat1", 3, 62, 3, "Global", "Northern", "Tamale Central"),
-            LeaderboardEntity(UUID.randomUUID().toString(), "dummy_3", "Aba Mensah", "quiz2", "cat2", 3, 90, 1, "Global", "Western", "Takoradi")
-        )
-        quizAppDao.insertLeaderboardEntries(testLeaders)
-
-        // Push all this newly created seed data up to Remote Firestore
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                cats.forEach { FirebaseFirestoreSync.pushCategory(it) }
-                FirebaseFirestoreSync.pushUser(adminUser)
-                FirebaseFirestoreSync.pushUser(partyUser)
-                FirebaseFirestoreSync.pushQuiz(q1)
-                FirebaseFirestoreSync.pushQuiz(q2)
-                questions.forEach { FirebaseFirestoreSync.pushQuestion(it) }
-                FirebaseFirestoreSync.pushSponsor(s1)
-                FirebaseFirestoreSync.pushSponsor(s2)
-                FirebaseFirestoreSync.pushAnnouncement(an1)
-                FirebaseFirestoreSync.pushAnnouncement(an2)
-                testLeaders.forEach { FirebaseFirestoreSync.pushLeaderboardEntry(it) }
-                Log.i("QuizRepository", "Successfully uploaded all seed data to remote Firestore backend!")
-            } catch (e: Exception) {
-                Log.e("QuizRepository", "Failed uploading seed data to remote: ${e.message}")
-            }
+            Log.e("QuizRepository", "Remote database sync failed: ${e.message}")
         }
     }
 }

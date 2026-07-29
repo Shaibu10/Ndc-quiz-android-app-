@@ -8,6 +8,9 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import com.google.android.gms.tasks.Task
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 object FirebaseFirestoreSync {
 
@@ -636,6 +639,78 @@ object FirebaseFirestoreSync {
         } catch (e: Exception) {
             Log.e("FirebaseSync", "Error clearing leaderboard: ${e.message}", e)
             throw e
+        }
+    }
+
+    fun startRealtimeSync(quizAppDao: QuizAppDao) {
+        val db = FirebaseFirestore.getInstance()
+
+        // Sync Users
+        db.collection("users").addSnapshotListener { snapshot, e ->
+            if (e == null && snapshot != null) {
+                for (change in snapshot.documentChanges) {
+                    when (change.type) {
+                        com.google.firebase.firestore.DocumentChange.Type.ADDED,
+                        com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
+                            val doc = change.document
+                            val user = UserEntity(
+                                id = doc.id,
+                                fullName = doc.getString("fullName") ?: "",
+                                phoneNumber = doc.getString("phoneNumber") ?: "",
+                                email = doc.getString("email") ?: "",
+                                region = doc.getString("region") ?: "",
+                                constituency = doc.getString("constituency") ?: "",
+                                role = doc.getString("role") ?: "",
+                                status = doc.getString("status") ?: "",
+                                profilePhoto = doc.getString("profilePhoto") ?: "",
+                                passwordHash = doc.getString("passwordHash") ?: "",
+                                languagePreference = doc.getString("languagePreference") ?: "English",
+                                createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis(),
+                                updatedAt = doc.getLong("updatedAt") ?: System.currentTimeMillis()
+                            )
+                            CoroutineScope(Dispatchers.IO).launch { quizAppDao.insertUser(user) }
+                        }
+                        com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
+                            CoroutineScope(Dispatchers.IO).launch { quizAppDao.deleteUserById(change.document.id) }
+                        }
+                    }
+                }
+            }
+        }
+        // Sync Quizzes
+        db.collection("quizzes").addSnapshotListener { snapshot, e ->
+            if (e == null && snapshot != null) {
+                for (change in snapshot.documentChanges) {
+                    when (change.type) {
+                        com.google.firebase.firestore.DocumentChange.Type.ADDED,
+                        com.google.firebase.firestore.DocumentChange.Type.MODIFIED -> {
+                            val doc = change.document
+                            val quiz = QuizEntity(
+                                id = doc.id,
+                                categoryId = doc.getString("categoryId") ?: "",
+                                title = doc.getString("title") ?: "",
+                                description = doc.getString("description") ?: "",
+                                imageUrl = doc.getString("imageUrl") ?: "",
+                                sponsorName = doc.getString("sponsorName") ?: "",
+                                sponsorLogo = doc.getString("sponsorLogo") ?: "",
+                                accessCode = doc.getString("accessCode") ?: "",
+                                timeLimitMinutes = doc.getLong("timeLimitMinutes")?.toInt() ?: 15,
+                                startDate = doc.getString("startDate") ?: "",
+                                endDate = doc.getString("endDate") ?: "",
+                                totalQuestions = doc.getLong("totalQuestions")?.toInt() ?: 10,
+                                createdBy = doc.getString("createdBy") ?: "",
+                                sponsorId = doc.getString("sponsorId") ?: "",
+                                maxAttempts = doc.getLong("maxAttempts")?.toInt() ?: 3,
+                                active = doc.getBoolean("active") ?: true
+                            )
+                            CoroutineScope(Dispatchers.IO).launch { quizAppDao.insertQuiz(quiz) }
+                        }
+                        com.google.firebase.firestore.DocumentChange.Type.REMOVED -> {
+                            CoroutineScope(Dispatchers.IO).launch { quizAppDao.deleteQuizById(change.document.id) }
+                        }
+                    }
+                }
+            }
         }
     }
 

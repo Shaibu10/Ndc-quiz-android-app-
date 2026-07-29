@@ -45,15 +45,17 @@ class MainActivity : ComponentActivity() {
         // Local Persistence Database Initialization
         val database = AppDatabase.getDatabase(applicationContext)
         val quizAppDao = database.quizAppDao()
+        com.example.data.remote.FirebaseFirestoreSync.startRealtimeSync(quizAppDao)
         val repository = SupabaseOfflineFirstQuizRepository(quizAppDao)
         val userPreferences = UserPreferences(applicationContext.dataStore)
 
         // ViewModels
         val authViewModel = AuthViewModel(repository, userPreferences)
-        val quizViewModel = QuizViewModel(repository)
+        val quizViewModel = QuizViewModel(repository, userPreferences)
 
         setContent {
-            MyApplicationTheme {
+            val isDarkTheme by quizViewModel.isDarkTheme.collectAsStateWithLifecycle()
+            MyApplicationTheme(darkTheme = isDarkTheme) {
                 val navController = rememberNavController()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route

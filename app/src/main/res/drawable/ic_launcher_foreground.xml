@@ -1,13 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,24A30,30 0,1 0,84,54A30,30 0,0 0,54,24ZM54,78A24,24 0,1 1,78,54A24,24 0,0 1,54,78Z"/>
-    <path
-        android:fillColor="#DD1C1A"
-        android:pathData="M54,34A20,20 0,1 0,74,54A20,20 0,0 0,54,34Z"/>
-</vector>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="66dp"
+        android:height="66dp"
+        android:drawable="@drawable/ndc_quiz_icon_v2_1785247020602"
+        android:gravity="center" />
+</layer-list>

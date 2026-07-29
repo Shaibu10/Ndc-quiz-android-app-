@@ -2,6 +2,9 @@ package com.example.ui.screens
 
 import android.app.Activity
 import android.view.WindowManager
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -128,16 +131,19 @@ fun SplashScreen(
 ) {
     val user by authViewModel.currentUser.collectAsStateWithLifecycle()
     val onboardingCompleted by authViewModel.onboardingCompleted.collectAsStateWithLifecycle()
+    val isCheckingAuth by authViewModel.isCheckingAuth.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        delay(2500)
-        onSplashFinished()
+    LaunchedEffect(isCheckingAuth) {
+        if (!isCheckingAuth) {
+            delay(500) // Small buffer
+            onSplashFinished()
+        }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(NDCCharcoal),
+            .background(MaterialTheme.colorScheme.background),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -327,7 +333,6 @@ fun LoginScreen(
 ) {
     var emailOrPhone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var isAdminLogin by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
     var rememberMe by remember { mutableStateOf(false) }
 
@@ -338,7 +343,7 @@ fun LoginScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(NDCCharcoal)
+            .background(MaterialTheme.colorScheme.background)
             .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
@@ -348,7 +353,7 @@ fun LoginScreen(
         NDCLogo(size = 90)
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = if (isAdminLogin) "NDC ADMIN PORTAL" else "NDC QUIZ COMBAT",
+                text = "NDC QUIZ COMBAT",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
@@ -369,25 +374,7 @@ fun LoginScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    // Admin Selector Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Sign in as Admin", color = Color.White, fontSize = 14.sp)
-                        Switch(
-                            checked = isAdminLogin,
-                            onCheckedChange = { isAdminLogin = it },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = NDCGreen,
-                                checkedTrackColor = NDCGreen.copy(alpha = 0.5f)
-                            )
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
+                    
                     TextField(
                         value = emailOrPhone,
                         onValueChange = { emailOrPhone = it },
@@ -460,18 +447,14 @@ fun LoginScreen(
                                     Toast.makeText(context, "Credentials cannot be empty", Toast.LENGTH_SHORT).show()
                                 } else {
                                     authViewModel.login(emailOrPhone, password, rememberMe) { user ->
-                                        if (isAdminLogin && user.role == "User") {
-                                            Toast.makeText(context, "Unauthorized. Admin role required.", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            onLoginSuccess(user)
-                                        }
+                                        onLoginSuccess(user)
                                     }
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = if (isAdminLogin) NDCRed else NDCGreen),
+                            colors = ButtonDefaults.buttonColors(containerColor = NDCGreen),
                             modifier = Modifier.fillMaxWidth().height(48.dp).testTag("login_button")
                         ) {
-                            Text(if (isAdminLogin) "ACCESS ADMIN CONSOLE" else "LOG IN", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("LOG IN", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -686,6 +669,18 @@ fun HomeScreen(
     var activeTab by remember { mutableStateOf("Quizzes") }
     var expanded by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf<CategoryEntity?>(null) }
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+        val isConnected = capabilities != null && (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))
+        
+        if (!isConnected) {
+            Toast.makeText(context, "No Internet Connection. Sync is currently disabled.", Toast.LENGTH_LONG).show()
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -757,7 +752,7 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(NDCDarkBg)
+                .background(MaterialTheme.colorScheme.background)
         ) {
             // Header
             Row(
@@ -790,11 +785,6 @@ fun HomeScreen(
                 }
 
                 Row {
-                    IconButton(onClick = {
-                        Toast.makeText(navController.context, "Syncing quiz records with remote Supabase servers...", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Default.CloudSync, contentDescription = "Sync", tint = NDCGreen)
-                    }
                     IconButton(onClick = {
                         authViewModel.logout {
                             navController.navigate("login") {
@@ -848,7 +838,7 @@ fun HomeScreen(
                         ) {
                             items(activeAnnouncements) { announce ->
                                 Card(
-                                    colors = CardDefaults.cardColors(containerColor = NDCGreen.copy(alpha = 0.15f)),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                                     border = BorderStroke(1.dp, NDCGreen),
                                     modifier = Modifier.width(280.dp)
                                 ) {
@@ -861,14 +851,14 @@ fun HomeScreen(
                                                     .fillMaxWidth()
                                                     .height(115.dp)
                                                     .clip(RoundedCornerShape(6.dp))
-                                                    .background(NDCDarkBg),
+                                                    .background(MaterialTheme.colorScheme.background),
                                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
                                         }
-                                        Text(announce.title, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                                        Text(announce.title, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
                                         Spacer(modifier = Modifier.height(4.dp))
-                                        Text(announce.content, color = Color.LightGray, fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                                        Text(announce.content, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 4, overflow = TextOverflow.Ellipsis)
 
                                         if (!announce.linkUrl.isNullOrBlank()) {
                                             val currentUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
@@ -987,7 +977,18 @@ fun HomeScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 6.dp)
-                                .clickable { onNavigateToQuiz(quiz) }
+                                .clickable {
+                                    val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                                    val network = connectivityManager.activeNetwork
+                                    val capabilities = connectivityManager.getNetworkCapabilities(network)
+                                    val isConnected = capabilities != null && (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))
+                                    
+                                    if (isConnected) {
+                                        onNavigateToQuiz(quiz)
+                                    } else {
+                                        Toast.makeText(context, "No Internet Connection. Cannot start quiz.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                                 .testTag("quiz_card_${quiz.id}")
                         ) {
                             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1208,12 +1209,14 @@ fun QuizScreen(
 
     // APP SWITCHING LOBBY DETECTION: pause tracker
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, isQuizCompleted, showSponsorScreen, activeQuiz) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
-                // User switched apps
-                quizViewModel.detectAppSwitching()
-                Toast.makeText(context, "Anti-Cheat Warning: App switching is restricted!", Toast.LENGTH_LONG).show()
+                // User switched apps during an active quiz session (not completed and past sponsor screen)
+                if (!isQuizCompleted && !showSponsorScreen && activeQuiz != null) {
+                    quizViewModel.detectAppSwitching()
+                    Toast.makeText(context, "Anti-Cheat Warning: App switching is restricted!", Toast.LENGTH_LONG).show()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -1225,6 +1228,9 @@ fun QuizScreen(
     // Auto navigate to outcome result
     LaunchedEffect(isQuizCompleted) {
         if (isQuizCompleted) {
+            if (warnCount >= 3) {
+                Toast.makeText(context, "Quiz submitted automatically due to 3 app switches.", Toast.LENGTH_LONG).show()
+            }
             val correct = questions.count { selectedAnswers[it.id] == it.correctAnswer }
             onNavigateToResults(correct, questions.size, ((activeQuiz?.timeLimitMinutes ?: 0) * 60 - timeLeft).toLong())
         }
@@ -1987,6 +1993,25 @@ fun ProfileScreen(
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Dark Mode", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val isDarkTheme by quizViewModel.isDarkTheme.collectAsStateWithLifecycle()
+                        Switch(
+                            checked = isDarkTheme,
+                            onCheckedChange = { quizViewModel.toggleDarkTheme() },
+                            colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                }
             }
 
             if (isEditing) {
@@ -2609,6 +2634,11 @@ fun AdminDashboardScreen(
 
     var activeAdminTab by remember { mutableStateOf("Analytics") } // Analytics, Quizzes, Users, Sponsors & Categories, Audit
 
+    // Regional Analytics Interactivity States
+    var analyticsSelectedRegion by remember { mutableStateOf<String?>(null) }
+    var analyticsRegionViewMode by remember { mutableStateOf("Bar Chart") } // "Bar Chart" vs "Ranked List"
+    var analyticsRegionSortMode by remember { mutableStateOf("Users") } // "Users" vs "Submissions" vs "Alphabetical"
+
     // Admin Leaderboard states
     var adminLeaderboardSelectedQuizId by remember { mutableStateOf<String?>(null) }
     var adminLeaderboardSelectedCategoryId by remember { mutableStateOf<String?>(null) }
@@ -2642,6 +2672,7 @@ fun AdminDashboardScreen(
     var auditLogSearchQuery by remember { mutableStateOf("") }
     var auditLogSelectedAction by remember { mutableStateOf("All") }
     var auditLogDropdownExpanded by remember { mutableStateOf(false) }
+    var showConfirmClearAuditLogs by remember { mutableStateOf(false) }
 
     var configProvider by remember { mutableStateOf("Firebase") }
     var configDbUrl by remember { mutableStateOf("https://firestore.googleapis.com/v1/projects/ndc-quiz-android-app/databases/(default)/documents") }
@@ -2860,18 +2891,18 @@ fun AdminDashboardScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
-                                                Text("QUIZ ATTEMPTS", color = Color(0xFF38BDF8), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text("QUIZ ATTEMPTS", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                                 Spacer(modifier = Modifier.height(4.dp))
-                                                Text("${adminLeaderboardEntries.size}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                                                Text("Completed submissions", color = Color.LightGray, fontSize = 9.sp)
+                                                Text("${adminLeaderboardEntries.size}", color = MaterialTheme.colorScheme.onSurface, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                                Text("Completed submissions", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
                                             }
-                                            Icon(Icons.Default.Leaderboard, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(24.dp))
+                                            Icon(Icons.Default.Leaderboard, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                                         }
                                     }
 
                                     // Card 4: Sponsors
                                     Card(
-                                        colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                                         border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
                                         modifier = Modifier.weight(1f)
                                     ) {
@@ -2880,10 +2911,10 @@ fun AdminDashboardScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
-                                                Text("PARTNERS", color = NDCRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text("PARTNERS", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                                 Spacer(modifier = Modifier.height(4.dp))
-                                                Text("${sponsors.size}", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                                                Text("Supporting brands", color = Color.LightGray, fontSize = 9.sp)
+                                                Text("${sponsors.size}", color = MaterialTheme.colorScheme.onSurface, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                                                Text("Supporting brands", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
                                             }
                                             Icon(Icons.Default.Business, contentDescription = null, tint = NDCRed, modifier = Modifier.size(24.dp))
                                         }
@@ -2975,118 +3006,535 @@ fun AdminDashboardScreen(
 
                             Spacer(modifier = Modifier.height(24.dp))
 
-                            // Region counts dynamic graphing
-                            val regionCounts = users.groupBy {
-                                val r = it.region.trim().uppercase()
-                                when {
-                                    r.contains("ACCRA") || r == "GAR" || r.contains("GREATER") -> "G. ACCRA"
-                                    r.contains("ASHANTI") || r == "ASH" -> "ASHANTI"
-                                    r.contains("WEST") && !r.contains("NORTH") -> "WESTERN"
-                                    r.contains("EAST") -> "EASTERN"
-                                    r.contains("NORTH") -> "NORTHERN"
-                                    r.contains("VOLTA") || r == "VR" -> "VOLTA"
-                                    r.contains("CENTRAL") || r == "CR" -> "CENTRAL"
-                                    else -> "OTHER"
-                                }
-                            }.mapValues { it.value.size }
+                             // Comprehensive Interactive Regional Analytics for ALL 16 Regions
+                             val officialRegionsList = listOf(
+                                 Triple("Greater Accra", "ACC", "G. Accra"),
+                                 Triple("Ashanti", "ASH", "Ashanti"),
+                                 Triple("Eastern", "EST", "Eastern"),
+                                 Triple("Central", "CEN", "Central"),
+                                 Triple("Western", "WST", "Western"),
+                                 Triple("Western North", "WN", "W. North"),
+                                 Triple("Volta", "VOL", "Volta"),
+                                 Triple("Oti", "OTI", "Oti"),
+                                 Triple("Northern", "NOR", "Northern"),
+                                 Triple("Savannah", "SAV", "Savannah"),
+                                 Triple("North East", "NE", "N. East"),
+                                 Triple("Upper East", "UE", "U. East"),
+                                 Triple("Upper West", "UW", "U. West"),
+                                 Triple("Bono", "BNO", "Bono"),
+                                 Triple("Bono East", "BE", "Bono East"),
+                                 Triple("Ahafo", "AHF", "Ahafo")
+                             )
 
-                            val chartRegions = listOf("G. ACCRA", "ASHANTI", "WESTERN", "EASTERN", "NORTHERN")
-                            val chartCounts = chartRegions.map { reg ->
-                                regionCounts[reg] ?: 0
-                            }
+                             fun mapToOfficialRegion(raw: String): String {
+                                 val r = raw.trim().uppercase()
+                                 return when {
+                                     r.contains("ACCRA") || r == "GAR" || r.contains("GREATER") -> "Greater Accra"
+                                     r.contains("ASHANTI") || r == "ASH" -> "Ashanti"
+                                     r.contains("WESTERN NORTH") || r == "WN" -> "Western North"
+                                     r.contains("WESTERN") || r == "WR" || r == "WST" -> "Western"
+                                     r.contains("EASTERN") || r == "ER" || r == "EST" -> "Eastern"
+                                     r.contains("CENTRAL") || r == "CR" || r == "CEN" -> "Central"
+                                     r.contains("VOLTA") || r == "VR" || r == "VOL" -> "Volta"
+                                     r.contains("OTI") || r == "OR" -> "Oti"
+                                     r.contains("NORTH EAST") || r.contains("NORTHEAST") || r == "NER" -> "North East"
+                                     r.contains("NORTHERN") || r == "NR" || r == "NOR" -> "Northern"
+                                     r.contains("SAVANNAH") || r == "SR" || r == "SAV" -> "Savannah"
+                                     r.contains("UPPER EAST") || r == "UER" || r == "UE" -> "Upper East"
+                                     r.contains("UPPER WEST") || r == "UWR" || r == "UW" -> "Upper West"
+                                     r.contains("BONO EAST") || r == "BER" || r == "BE" -> "Bono East"
+                                     r.contains("BONO") || r == "BR" || r == "BNO" -> "Bono"
+                                     r.contains("AHAFO") || r == "AR" || r == "AHF" -> "Ahafo"
+                                     else -> raw.ifBlank { "Other" }
+                                 }
+                             }
 
-                            // Dynamic Region Bar Chart
-                            val maxCount = chartCounts.maxOrNull() ?: 1
-                            val maxCountSafe = if (maxCount == 0) 1 else maxCount
+                             // Build Region Statistics
+                             val allRegionStats = officialRegionsList.map { (fullName, shortCode, displayLabel) ->
+                                 val regUsers = users.filter { mapToOfficialRegion(it.region) == fullName }
+                                 val regUserIds = regUsers.map { it.id }.toSet()
+                                 val regUserNames = regUsers.map { it.fullName.uppercase() }.toSet()
+                                 val regSubmissions = adminLeaderboardEntries.filter { it.userId in regUserIds || it.userFullName.uppercase() in regUserNames }
+                                 val avgSc = if (regSubmissions.isNotEmpty()) regSubmissions.map { it.score }.average() else 0.0
+                                 val topPerf = regSubmissions.maxByOrNull { it.score }
+                                 
+                                 data class RegionAnalyticsData(
+                                     val fullName: String,
+                                     val shortCode: String,
+                                     val displayLabel: String,
+                                     val userCount: Int,
+                                     val submissionCount: Int,
+                                     val avgScore: Double,
+                                     val topPerformer: LeaderboardEntity?
+                                 )
+                                 
+                                 RegionAnalyticsData(
+                                     fullName = fullName,
+                                     shortCode = shortCode,
+                                     displayLabel = displayLabel,
+                                     userCount = regUsers.size,
+                                     submissionCount = regSubmissions.size,
+                                     avgScore = avgSc,
+                                     topPerformer = topPerf
+                                 )
+                             }
 
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
-                                border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(16.dp)) {
-                                    Text(
-                                        "REGIONAL PARTICIPATION DENSITY GRAPH",
-                                        fontWeight = FontWeight.Bold,
-                                        color = NDCOffWhite,
-                                        fontSize = 12.sp,
-                                        letterSpacing = 0.5.sp
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        "Live registered user distribution across major contest regions.",
-                                        color = Color.LightGray,
-                                        fontSize = 10.sp
-                                    )
-                                    Spacer(modifier = Modifier.height(20.dp))
+                             val sortedRegionStats = when (analyticsRegionSortMode) {
+                                 "Submissions" -> allRegionStats.sortedByDescending { it.submissionCount }
+                                 "Alphabetical" -> allRegionStats.sortedBy { it.fullName }
+                                 else -> allRegionStats.sortedByDescending { it.userCount }
+                             }
 
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(150.dp),
-                                        horizontalArrangement = Arrangement.SpaceEvenly,
-                                        verticalAlignment = Alignment.Bottom
-                                    ) {
-                                        chartRegions.forEachIndexed { index, name ->
-                                            val count = chartCounts.getOrElse(index) { 0 }
-                                            val barHeightFraction = count.toFloat() / maxCountSafe.toFloat()
-                                            
-                                            Column(
-                                                horizontalAlignment = Alignment.CenterHorizontally,
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                // Count tag
-                                                Text(
-                                                    text = count.toString(),
-                                                    color = Color.White,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                
-                                                // Dynamic scaled height Bar
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxHeight(0.75f * barHeightFraction + 0.05f) // scale 75% max height, 5% minimum
-                                                        .width(32.dp)
-                                                        .background(
-                                                            brush = Brush.verticalGradient(
-                                                                colors = if (index % 2 == 0) {
-                                                                    listOf(NDCGreen.copy(alpha = 0.7f), NDCGreen)
-                                                                } else {
-                                                                    listOf(NDCRed.copy(alpha = 0.7f), NDCRed)
-                                                                }
-                                                            ),
-                                                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
-                                                        )
-                                                        .border(
-                                                            width = 1.dp,
-                                                            color = if (index % 2 == 0) NDCGreen.copy(alpha = 0.5f) else NDCRed.copy(alpha = 0.5f),
-                                                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
-                                                        )
-                                                )
-                                                Spacer(modifier = Modifier.height(6.dp))
-                                                
-                                                // Region code
-                                                Text(
-                                                    text = when (name) {
-                                                        "G. ACCRA" -> "Accra"
-                                                        "ASHANTI" -> "Ashanti"
-                                                        "WESTERN" -> "Western"
-                                                        "EASTERN" -> "Eastern"
-                                                        "NORTHERN" -> "Northern"
-                                                        else -> name
-                                                    },
-                                                    color = Color.LightGray,
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    maxLines = 1
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                             val maxRegionUserCount = allRegionStats.maxOfOrNull { it.userCount }?.coerceAtLeast(1) ?: 1
+                             val activeRegionsCount = allRegionStats.count { it.userCount > 0 }
+
+                             Card(
+                                 colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                 border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)),
+                                 modifier = Modifier.fillMaxWidth()
+                             ) {
+                                 Column(modifier = Modifier.padding(16.dp)) {
+                                     // Title & Overview Header
+                                     Row(
+                                         modifier = Modifier.fillMaxWidth(),
+                                         horizontalArrangement = Arrangement.SpaceBetween,
+                                         verticalAlignment = Alignment.CenterVertically
+                                     ) {
+                                         Column(modifier = Modifier.weight(1f)) {
+                                             Text(
+                                                 "NATIONAL REGIONAL DENSITY (ALL 16 REGIONS)",
+                                                 fontWeight = FontWeight.Bold,
+                                                 color = NDCOffWhite,
+                                                 fontSize = 12.sp,
+                                                 letterSpacing = 0.5.sp
+                                             )
+                                             Text(
+                                                 "Live distribution & participation breakdown across all regions of Ghana.",
+                                                 color = Color.LightGray,
+                                                 fontSize = 10.sp
+                                             )
+                                         }
+                                         
+                                         Surface(
+                                             color = NDCGreen.copy(alpha = 0.2f),
+                                             shape = RoundedCornerShape(12.dp),
+                                             border = BorderStroke(1.dp, NDCGreen.copy(alpha = 0.4f))
+                                         ) {
+                                             Text(
+                                                 "$activeRegionsCount / 16 Active",
+                                                 color = NDCGreen,
+                                                 fontSize = 10.sp,
+                                                 fontWeight = FontWeight.Bold,
+                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                             )
+                                         }
+                                     }
+
+                                     Spacer(modifier = Modifier.height(14.dp))
+
+                                     // View Mode & Sort Controls
+                                     Row(
+                                         modifier = Modifier.fillMaxWidth(),
+                                         horizontalArrangement = Arrangement.SpaceBetween,
+                                         verticalAlignment = Alignment.CenterVertically
+                                     ) {
+                                         // View Mode Toggle (Bar Chart vs Ranked List)
+                                         Row(
+                                             modifier = Modifier
+                                                 .background(NDCDarkBg, RoundedCornerShape(8.dp))
+                                                 .border(1.dp, Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                                 .padding(2.dp),
+                                             verticalAlignment = Alignment.CenterVertically
+                                         ) {
+                                             Surface(
+                                                 color = if (analyticsRegionViewMode == "Bar Chart") NDCGreen else Color.Transparent,
+                                                 shape = RoundedCornerShape(6.dp),
+                                                 modifier = Modifier.clickable { analyticsRegionViewMode = "Bar Chart" }
+                                             ) {
+                                                 Row(
+                                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                                     verticalAlignment = Alignment.CenterVertically
+                                                 ) {
+                                                     Icon(
+                                                         Icons.Default.BarChart,
+                                                         contentDescription = null,
+                                                         tint = if (analyticsRegionViewMode == "Bar Chart") Color.Black else Color.Gray,
+                                                         modifier = Modifier.size(13.dp)
+                                                     )
+                                                     Spacer(modifier = Modifier.width(4.dp))
+                                                     Text(
+                                                         "Graph",
+                                                         fontSize = 10.sp,
+                                                         fontWeight = FontWeight.Bold,
+                                                         color = if (analyticsRegionViewMode == "Bar Chart") Color.Black else Color.Gray
+                                                     )
+                                                 }
+                                             }
+
+                                             Surface(
+                                                 color = if (analyticsRegionViewMode == "Ranked List") NDCGreen else Color.Transparent,
+                                                 shape = RoundedCornerShape(6.dp),
+                                                 modifier = Modifier.clickable { analyticsRegionViewMode = "Ranked List" }
+                                             ) {
+                                                 Row(
+                                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                                     verticalAlignment = Alignment.CenterVertically
+                                                 ) {
+                                                     Icon(
+                                                         Icons.Default.FormatListNumbered,
+                                                         contentDescription = null,
+                                                         tint = if (analyticsRegionViewMode == "Ranked List") Color.Black else Color.Gray,
+                                                         modifier = Modifier.size(13.dp)
+                                                     )
+                                                     Spacer(modifier = Modifier.width(4.dp))
+                                                     Text(
+                                                         "List",
+                                                         fontSize = 10.sp,
+                                                         fontWeight = FontWeight.Bold,
+                                                         color = if (analyticsRegionViewMode == "Ranked List") Color.Black else Color.Gray
+                                                     )
+                                                 }
+                                             }
+                                         }
+
+                                         // Sort Options
+                                         Row(verticalAlignment = Alignment.CenterVertically) {
+                                             Text("Sort: ", color = Color.Gray, fontSize = 10.sp)
+                                             listOf("Users", "Submissions", "Alphabetical").forEach { mode ->
+                                                 val isSel = analyticsRegionSortMode == mode
+                                                 Text(
+                                                     text = mode,
+                                                     color = if (isSel) NDCGold else Color.Gray,
+                                                     fontSize = 10.sp,
+                                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                                     modifier = Modifier
+                                                         .padding(horizontal = 4.dp)
+                                                         .clickable { analyticsRegionSortMode = mode }
+                                                 )
+                                             }
+                                         }
+                                     }
+
+                                     Spacer(modifier = Modifier.height(16.dp))
+
+                                     // Render View based on analyticsRegionViewMode
+                                     if (analyticsRegionViewMode == "Bar Chart") {
+                                         // Interactive Horizontal Scroll Bar Chart showing ALL 16 Regions
+                                         Text(
+                                             "👉 Swipe horizontally to view all 16 regions • Tap any bar to view details",
+                                             color = Color.LightGray.copy(alpha = 0.7f),
+                                             fontSize = 9.sp,
+                                             modifier = Modifier.padding(bottom = 8.dp)
+                                         )
+
+                                         Box(
+                                             modifier = Modifier
+                                                 .fillMaxWidth()
+                                                 .background(NDCDarkBg.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                                 .border(1.dp, Color.Gray.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                                 .padding(vertical = 12.dp, horizontal = 4.dp)
+                                         ) {
+                                             Row(
+                                                 modifier = Modifier
+                                                     .fillMaxWidth()
+                                                     .height(170.dp)
+                                                     .horizontalScroll(rememberScrollState()),
+                                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                 verticalAlignment = Alignment.Bottom
+                                             ) {
+                                                 Spacer(modifier = Modifier.width(4.dp))
+                                                 sortedRegionStats.forEachIndexed { index, stat ->
+                                                     val isSelected = analyticsSelectedRegion == stat.fullName
+                                                     val barFraction = (stat.userCount.toFloat() / maxRegionUserCount.toFloat()).coerceIn(0.04f, 1.0f)
+
+                                                     Column(
+                                                         horizontalAlignment = Alignment.CenterHorizontally,
+                                                         modifier = Modifier
+                                                             .width(48.dp)
+                                                             .fillMaxHeight()
+                                                             .clickable {
+                                                                 analyticsSelectedRegion = if (isSelected) null else stat.fullName
+                                                             }
+                                                     ) {
+                                                         // Count label on top
+                                                         Text(
+                                                             text = "${stat.userCount}",
+                                                             color = if (isSelected) NDCGold else if (stat.userCount > 0) Color.White else Color.Gray,
+                                                             fontSize = 10.sp,
+                                                             fontWeight = FontWeight.Bold
+                                                         )
+
+                                                         Spacer(modifier = Modifier.height(4.dp))
+
+                                                         // Bar container with height proportion
+                                                         Box(
+                                                             modifier = Modifier
+                                                                 .weight(1f)
+                                                                 .fillMaxWidth(),
+                                                             contentAlignment = Alignment.BottomCenter
+                                                         ) {
+                                                             Box(
+                                                                 modifier = Modifier
+                                                                     .fillMaxWidth(0.85f)
+                                                                     .fillMaxHeight(barFraction)
+                                                                     .background(
+                                                                         brush = Brush.verticalGradient(
+                                                                             colors = when {
+                                                                                 isSelected -> listOf(NDCGold, NDCGold.copy(alpha = 0.7f))
+                                                                                 stat.userCount == maxRegionUserCount && stat.userCount > 0 -> listOf(NDCGreen, NDCGreen.copy(alpha = 0.6f))
+                                                                                 index % 2 == 0 -> listOf(NDCGreen.copy(alpha = 0.85f), NDCGreen.copy(alpha = 0.4f))
+                                                                                 else -> listOf(NDCRed.copy(alpha = 0.85f), NDCRed.copy(alpha = 0.4f))
+                                                                             }
+                                                                         ),
+                                                                         shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
+                                                                     )
+                                                                     .border(
+                                                                         width = if (isSelected) 2.dp else 1.dp,
+                                                                         color = if (isSelected) NDCGold else Color.Gray.copy(alpha = 0.3f),
+                                                                         shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
+                                                                     )
+                                                             )
+                                                         }
+
+                                                         Spacer(modifier = Modifier.height(6.dp))
+
+                                                         // Short Code Label
+                                                         Text(
+                                                             text = stat.shortCode,
+                                                             color = if (isSelected) NDCGold else Color.LightGray,
+                                                             fontSize = 10.sp,
+                                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                             maxLines = 1
+                                                         )
+
+                                                         // Indicator dot if selected
+                                                         Box(
+                                                             modifier = Modifier
+                                                                 .padding(top = 2.dp)
+                                                                 .size(4.dp)
+                                                                 .background(if (isSelected) NDCGold else Color.Transparent, CircleShape)
+                                                         )
+                                                     }
+                                                 }
+                                                 Spacer(modifier = Modifier.width(4.dp))
+                                             }
+                                         }
+                                     } else {
+                                         // Ranked List View Mode
+                                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                             sortedRegionStats.forEachIndexed { rankIdx, stat ->
+                                                 val isSelected = analyticsSelectedRegion == stat.fullName
+                                                 Card(
+                                                     colors = CardDefaults.cardColors(
+                                                         containerColor = if (isSelected) NDCGreen.copy(alpha = 0.15f) else NDCDarkBg.copy(alpha = 0.6f)
+                                                     ),
+                                                     border = BorderStroke(
+                                                         width = 1.dp,
+                                                         color = if (isSelected) NDCGold else Color.Gray.copy(alpha = 0.2f)
+                                                     ),
+                                                     modifier = Modifier
+                                                         .fillMaxWidth()
+                                                         .clickable {
+                                                             analyticsSelectedRegion = if (isSelected) null else stat.fullName
+                                                         }
+                                                 ) {
+                                                     Row(
+                                                         modifier = Modifier
+                                                             .fillMaxWidth()
+                                                             .padding(10.dp),
+                                                         verticalAlignment = Alignment.CenterVertically,
+                                                         horizontalArrangement = Arrangement.SpaceBetween
+                                                     ) {
+                                                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                             Surface(
+                                                                 color = if (rankIdx < 3 && stat.userCount > 0) NDCGold else NDCCharcoal,
+                                                                 shape = CircleShape,
+                                                                 modifier = Modifier.size(22.dp)
+                                                             ) {
+                                                                 Box(contentAlignment = Alignment.Center) {
+                                                                     Text(
+                                                                         "#${rankIdx + 1}",
+                                                                         fontSize = 9.sp,
+                                                                         fontWeight = FontWeight.Bold,
+                                                                         color = if (rankIdx < 3 && stat.userCount > 0) Color.Black else Color.White
+                                                                     )
+                                                                 }
+                                                             }
+
+                                                             Spacer(modifier = Modifier.width(10.dp))
+
+                                                             Column {
+                                                                 Text(
+                                                                     stat.fullName,
+                                                                     color = Color.White,
+                                                                     fontSize = 12.sp,
+                                                                     fontWeight = FontWeight.Bold
+                                                                 )
+                                                                 Text(
+                                                                     "${stat.submissionCount} quiz attempts • Avg ${String.format("%.1f", stat.avgScore)}%",
+                                                                     color = Color.LightGray,
+                                                                     fontSize = 10.sp
+                                                                 )
+                                                             }
+                                                         }
+
+                                                         Surface(
+                                                             color = NDCGreen.copy(alpha = 0.2f),
+                                                             shape = RoundedCornerShape(6.dp)
+                                                         ) {
+                                                             Text(
+                                                                 "${stat.userCount} Users",
+                                                                 color = NDCGreen,
+                                                                 fontSize = 10.sp,
+                                                                 fontWeight = FontWeight.Bold,
+                                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                             )
+                                                         }
+                                                     }
+                                                 }
+                                             }
+                                         }
+                                     }
+
+                                     // Selected Region Details Card Popup
+                                     val selStat = sortedRegionStats.find { it.fullName == analyticsSelectedRegion }
+                                     AnimatedVisibility(visible = selStat != null) {
+                                         selStat?.let { stat ->
+                                             Spacer(modifier = Modifier.height(14.dp))
+                                             Card(
+                                                 colors = CardDefaults.cardColors(containerColor = NDCDarkBg),
+                                                 border = BorderStroke(1.5.dp, NDCGold),
+                                                 modifier = Modifier.fillMaxWidth()
+                                             ) {
+                                                 Column(modifier = Modifier.padding(14.dp)) {
+                                                     Row(
+                                                         modifier = Modifier.fillMaxWidth(),
+                                                         horizontalArrangement = Arrangement.SpaceBetween,
+                                                         verticalAlignment = Alignment.CenterVertically
+                                                     ) {
+                                                         Row(verticalAlignment = Alignment.CenterVertically) {
+                                                             Icon(
+                                                                 Icons.Default.LocationOn,
+                                                                 contentDescription = null,
+                                                                 tint = NDCGold,
+                                                                 modifier = Modifier.size(18.dp)
+                                                             )
+                                                             Spacer(modifier = Modifier.width(6.dp))
+                                                             Text(
+                                                                 "${stat.fullName.uppercase()} REGION (${stat.shortCode})",
+                                                                 fontWeight = FontWeight.Bold,
+                                                                 color = NDCGold,
+                                                                 fontSize = 12.sp
+                                                             )
+                                                         }
+
+                                                         IconButton(
+                                                             onClick = { analyticsSelectedRegion = null },
+                                                             modifier = Modifier.size(24.dp)
+                                                         ) {
+                                                             Icon(
+                                                                 Icons.Default.Close,
+                                                                 contentDescription = "Close",
+                                                                 tint = Color.Gray,
+                                                                 modifier = Modifier.size(16.dp)
+                                                             )
+                                                         }
+                                                     }
+
+                                                     Spacer(modifier = Modifier.height(10.dp))
+                                                     Divider(color = Color.Gray.copy(alpha = 0.2f))
+                                                     Spacer(modifier = Modifier.height(10.dp))
+
+                                                     // 4 metrics grid
+                                                     Row(
+                                                         modifier = Modifier.fillMaxWidth(),
+                                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                     ) {
+                                                         Card(
+                                                             colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                                             modifier = Modifier.weight(1f)
+                                                         ) {
+                                                             Column(modifier = Modifier.padding(10.dp)) {
+                                                                 Text("REGISTRATION", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                                 Text("${stat.userCount} Users", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                                                 val pct = if (users.isNotEmpty()) (stat.userCount.toDouble() / users.size.toDouble()) * 100.0 else 0.0
+                                                                 Text("${String.format("%.1f", pct)}% of total", color = NDCGreen, fontSize = 9.sp)
+                                                             }
+                                                         }
+
+                                                         Card(
+                                                             colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                                             modifier = Modifier.weight(1f)
+                                                         ) {
+                                                             Column(modifier = Modifier.padding(10.dp)) {
+                                                                 Text("QUIZ ATTEMPTS", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                                 Text("${stat.submissionCount}", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                                                 Text("Completed", color = Color.LightGray, fontSize = 9.sp)
+                                                             }
+                                                         }
+                                                     }
+
+                                                     Spacer(modifier = Modifier.height(8.dp))
+
+                                                     Row(
+                                                         modifier = Modifier.fillMaxWidth(),
+                                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                     ) {
+                                                         Card(
+                                                             colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                                             modifier = Modifier.weight(1f)
+                                                         ) {
+                                                             Column(modifier = Modifier.padding(10.dp)) {
+                                                                 Text("AVG ACCURACY", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                                 Text("${String.format("%.1f", stat.avgScore)}%", color = NDCGold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                                                 Text("Region average", color = Color.LightGray, fontSize = 9.sp)
+                                                             }
+                                                         }
+
+                                                         Card(
+                                                             colors = CardDefaults.cardColors(containerColor = NDCCharcoal),
+                                                             modifier = Modifier.weight(1f)
+                                                         ) {
+                                                             Column(modifier = Modifier.padding(10.dp)) {
+                                                                 Text("TOP CONTESTANT", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                                 Text(
+                                                                     stat.topPerformer?.userFullName ?: "None yet",
+                                                                     color = Color.White,
+                                                                     fontSize = 11.sp,
+                                                                     fontWeight = FontWeight.Bold,
+                                                                     maxLines = 1
+                                                                 )
+                                                                 Text(
+                                                                     stat.topPerformer?.let { "${it.score}% Score" } ?: "N/A",
+                                                                     color = Color.LightGray,
+                                                                     fontSize = 9.sp
+                                                                 )
+                                                             }
+                                                         }
+                                                     }
+
+                                                     Spacer(modifier = Modifier.height(12.dp))
+
+                                                     // Action: Filter Leaderboard by this Region
+                                                     Button(
+                                                         onClick = {
+                                                             adminLeaderboardSelectedRegion = stat.fullName
+                                                             activeAdminTab = "Leaderboards"
+                                                         },
+                                                         colors = ButtonDefaults.buttonColors(containerColor = NDCGreen),
+                                                         modifier = Modifier.fillMaxWidth(),
+                                                         shape = RoundedCornerShape(8.dp)
+                                                     ) {
+                                                         Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                         Spacer(modifier = Modifier.width(6.dp))
+                                                         Text("VIEW ${stat.fullName.uppercase()} LEADERBOARD", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                                     }
+                                                 }
+                                             }
+                                         }
+                                     }
+                                 }
+                             }
 
                             Spacer(modifier = Modifier.height(24.dp))
 
@@ -5448,18 +5896,57 @@ fun AdminDashboardScreen(
                                 colors = TextFieldDefaults.colors(focusedContainerColor = NDCDarkBg, unfocusedContainerColor = NDCDarkBg, focusedTextColor = Color.White, unfocusedTextColor = Color.White)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Button(
-                                onClick = {
-                                    val filteredLogs = auditLogs.filter { log ->
-                                        (auditLogSearchQuery.isBlank() || log.action.contains(auditLogSearchQuery, true) || log.target.contains(auditLogSearchQuery, true))
-                                    }
-                                    exportAuditLogsToPdf(context, filteredLogs)
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = NDCGreen),
-                                modifier = Modifier.fillMaxWidth()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("EXPORT FILTERED LOGS TO PDF")
+                                Button(
+                                    onClick = {
+                                        val filteredLogs = auditLogs.filter { log ->
+                                            (auditLogSearchQuery.isBlank() || log.action.contains(auditLogSearchQuery, true) || log.target.contains(auditLogSearchQuery, true))
+                                        }
+                                        exportAuditLogsToPdf(context, filteredLogs)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = NDCGreen),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("EXPORT TO PDF", maxLines = 1)
+                                }
+                                Button(
+                                    onClick = { showConfirmClearAuditLogs = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = NDCRed),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("CLEAR ALL LOGS", maxLines = 1)
+                                }
                             }
+
+                            if (showConfirmClearAuditLogs) {
+                                AlertDialog(
+                                    onDismissRequest = { showConfirmClearAuditLogs = false },
+                                    containerColor = NDCCharcoal,
+                                    title = { Text("CLEAR ALL AUDIT LOGS", color = NDCRed, fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+                                    text = { Text("Are you absolutely sure you want to permanently clear all audit logs from this system? This action is irreversible.", color = Color.White, fontSize = 13.sp) },
+                                    confirmButton = {
+                                        TextButton(
+                                            onClick = {
+                                                quizViewModel.clearAllAuditLogs { success, msg ->
+                                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                }
+                                                showConfirmClearAuditLogs = false
+                                            }
+                                        ) {
+                                            Text("CONFIRM CLEAR", color = NDCRed, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showConfirmClearAuditLogs = false }) {
+                                            Text("CANCEL", color = Color.White)
+                                        }
+                                    }
+                                )
+                            }
+
                             Spacer(modifier = Modifier.height(10.dp))
                         }
 

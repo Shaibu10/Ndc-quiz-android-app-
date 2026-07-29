@@ -19,14 +19,16 @@ class AuthViewModel(
     // Auth states
     val currentUser = repository.currentUserState
 
-    private val _onboardingCompleted = MutableStateFlow(false)
-    val onboardingCompleted = _onboardingCompleted.asStateFlow()
+    val onboardingCompleted = userPreferences.isOnboardedFlow.stateIn(viewModelScope, SharingStarted.Lazily, false)
 
     private val _authError = MutableStateFlow<String?>(null)
     val authError = _authError.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
+
+    private val _isCheckingAuth = MutableStateFlow(true)
+    val isCheckingAuth = _isCheckingAuth.asStateFlow()
 
     // Registration UI states
     var regFullName = MutableStateFlow("")
@@ -44,9 +46,16 @@ class AuthViewModel(
 
     init {
         viewModelScope.launch {
-            repository.checkAndSeedDatabase()
+            repository.syncWithRemoteDatabase()
             
             // Remember Me
+            val userId = userPreferences.userIdFlow.firstOrNull()
+            if (userId != null && repository.currentUserState.value == null) {
+                repository.loginWithUserId(userId)
+            }
+            _isCheckingAuth.value = false
+
+            // Continue to collect in case of updates
             userPreferences.userIdFlow.collect { userId ->
                 if (userId != null && repository.currentUserState.value == null) {
                     repository.loginWithUserId(userId)
@@ -56,7 +65,9 @@ class AuthViewModel(
     }
 
     fun completeOnboarding() {
-        _onboardingCompleted.value = true
+        viewModelScope.launch {
+            userPreferences.setOnboarded(true)
+        }
     }
 
     fun login(emailOrPhone: String, passwordHash: String, rememberMe: Boolean, onMainSuccess: (UserEntity) -> Unit) {
@@ -164,7 +175,18 @@ class AuthViewModel(
     }
 }
 
-class QuizViewModel(private val repository: QuizRepository) : ViewModel() {
+class QuizViewModel(
+    private val repository: QuizRepository,
+    private val userPreferences: UserPreferences
+) : ViewModel() {
+    
+    val isDarkTheme = userPreferences.isDarkThemeFlow.stateIn(viewModelScope, SharingStarted.Lazily, true)
+
+    fun toggleDarkTheme() {
+        viewModelScope.launch {
+            userPreferences.setDarkTheme(!isDarkTheme.value)
+        }
+    }
 
     // Lists
     val categories = repository.categoriesFlow.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -209,7 +231,7 @@ class QuizViewModel(private val repository: QuizRepository) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            repository.checkAndSeedDatabase()
+            repository.syncWithRemoteDatabase()
         }
     }
 
@@ -222,6 +244,17 @@ class QuizViewModel(private val repository: QuizRepository) : ViewModel() {
 
     private val _isFirebaseOpLoading = MutableStateFlow(false)
     val isFirebaseOpLoading = _isFirebaseOpLoading.asStateFlow()
+
+    fun forceSync(onComplete: (String) -> Unit) {
+        viewModelScope.launch {
+            _isFirebaseOpLoading.value = true
+            _firebaseSyncState.value = "Synchronizing data with remote database..."
+            repository.syncWithRemoteDatabase()
+            _firebaseSyncState.value = "Sync complete."
+            _isFirebaseOpLoading.value = false
+            onComplete("Sync complete.")
+        }
+    }
 
     fun runFirebaseDiagnostics() {
         viewModelScope.launch {
@@ -259,6 +292,20 @@ class QuizViewModel(private val repository: QuizRepository) : ViewModel() {
         }
     }
 
+    fun clearAllAuditLogs(onComplete: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val result = repository.clearAllAuditLogs()
+            result.fold(
+                onSuccess = {
+                    onComplete(true, "Audit logs cleared successfully.")
+                },
+                onFailure = {
+                    onComplete(false, it.message ?: "Failed to clear audit logs.")
+                }
+            )
+        }
+    }
+
     fun clearFirebaseStatusMessages() {
         _firebaseDiagState.value = null
         _firebaseSyncState.value = null
@@ -284,6 +331,7 @@ class QuizViewModel(private val repository: QuizRepository) : ViewModel() {
             _quizResult.value = null
             _cheatAttemptCount.value = 0
             _currentQuestionIndex.value = 0
+            quizStartTimeEpoch = 0L
 
             val questions = repository.getQuestionsForQuizList(quiz.id)
             _quizQuestions.value = questions
@@ -333,17 +381,27 @@ class QuizViewModel(private val repository: QuizRepository) : ViewModel() {
 
     // Anti-cheating: detect app switching (onPause)
     fun detectAppSwitching() {
+        // Do not log or count cheat attempts if quiz is already completed or inactive
+        if (_isQuizCompleted.value || _activeQuiz.value == null) return
+
         _cheatAttemptCount.value += 1
         viewModelScope.launch {
             repository.addAuditLog("CHEAT_ATTEMPT", "App switching detected during active Quiz. Warn: ${_cheatAttemptCount.value}")
+        }
+        if (_cheatAttemptCount.value >= 3) {
+            val user = repository.currentUserState.value
+            if (user != null) {
+                submitQuiz(true, user.id)
+            }
         }
     }
 
     // Anti-cheating: verify timer manipulation
     private fun verifySystemTimeAccuracy(expectedSeconds: Int): Boolean {
+        if (quizStartTimeEpoch <= 0L) return true
         val elapsedActual = (System.currentTimeMillis() - quizStartTimeEpoch) / 1000
         val discrepancy = Math.abs(elapsedActual - expectedSeconds)
-        return discrepancy < 15 // Under 15-second discrepancy is normal
+        return discrepancy < 30 // Under 30-second discrepancy is normal
     }
 
     // Local save/resume progress
